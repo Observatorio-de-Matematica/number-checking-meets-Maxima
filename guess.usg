@@ -79,27 +79,30 @@ guess([1,2,7,42,429,7436,218348,10850216]);
                     i1 = 1   i2 = 1
 
 
+
 guess(makelist(k^3+k^2,k,1,7));
 
 
 Dependent equations eliminated:  (6)
-         i0 - 1
-         /===\
-          ! !                       5040
-      [2  ! !   (- --------------------------------------),
-          ! !        4        3         2
-         i1 = 1    i1  - 24 i1  + 245 i1  - 1422 i1 + 360
+                       i0 - 1
+                       /===\
+         2              ! !                       5040
+      [i0  (i0 + 1), 2  ! !   (- --------------------------------------),
+                        ! !        4        3         2
+                       i1 = 1    i1  - 24 i1  + 245 i1  - 1422 i1 + 360
 
-                                        i0 - 1
-                                        /===\
-                                         ! !   (i1 + 1) (i1 + 2)    2
-                                      2  ! !   -----------------, i0  (i0 
-+ 1)]
-                                         ! !            2
-                                        i1 = 1        i1
+                                                      i0 - 1
+                                                      /===\
+                                                       ! !   (i1 + 1) (i1 
++ 2)
+                                                    2  ! !   
+-----------------]
+                                                       ! !            2
+                                                      i1 = 1        i1
 
-Note that the last example produces three solutions. The last two are
-equivalent, but the first is different! In this case,
+Note that the last example produces three solutions. The first and the 
+last are
+equivalent, but the second is different! In this case,
 
 guess(makelist(k^3+k^2,k,1,7),1); 
 
