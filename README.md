@@ -1,5 +1,5 @@
 # number-checking-references
-Some info to start with number checkers
+Some info to start with number checkers. Also, i wanna try the Maxima implementations, and eventually develope something nice.
 
 # Superseeker (N. J. A. Sloane)
 https://oeis.org/ol_source.txt
