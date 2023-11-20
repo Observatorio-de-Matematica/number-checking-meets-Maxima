@@ -1,0 +1,6003 @@
+Source Code For Email Servers and Superseeker
+
+N. J. A. Sloane
+
+Aug 15 2010
+
+The email server and Superseeker have been on the web since 1994.
+They are described in http://www.research.att.com/~njas/sequences/ol.html.
+
+Now that the OEIS is owned by The OEIS Foundation Inc (see http://oeisf.org),
+is about to become a wiki, and will be moved to a new host
+(see http://oeis.org/classic/ and http://oeis.org/wiki/)
+a number of people have suggested that the email server and
+Superseeker should go "open source".
+Of course they will also be moved to the new host.
+We already have licenses for Maple and Mathematica on
+that machine.
+
+Here therefore is the present version of the source code 
+for these two services.
+
+Keep in mind that these programs were written by me alone,
+over a period of 16 years, and were not intended to be
+made public.
+
+They make use - with permission - of several programs written by friends,
+which may not be in the public domain.
+
+These programs were run on a series of machines,
+especially one called "fry", and most recently on "prim".
+These have different operating systems, so some of the commands and subprograms
+come in two versions.
+
+The programs use the plain flat file containing all the sequences, which
+is called "cat25". Of course this changes all the time.
+
+$ wc cat25
+  2761057  22805802 187271736 cat25
+
+Many thanks to Mira Bernstein, Harm Derksen, Olivier Gerard,
+Christian Kratthentaler, John Linderman, Simon Plouffe,
+Bruno Salvy, Paul Zimmermann and others whose programs
+are incorporated in Superseeker.
+
+Some of the programs are quite long and contain many comments.
+To help separate the different sections, the
+the programs below all begin with eight lines of equal signs,
+ike this:
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+Name of program or file
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+
+
+PART 1: THE EMAIL LOOKUP SERVER
+
+I include this because it uses Russ Cox's fast lookup - search.db -
+to test if a sequence is in the OEIS. In contrast, Superseeker,
+in Part 2, uses my old grep, which is much slower. If I had more
+time, I would switch over Superseeker to use search.db.
+
+Here is the program, called "hisP" 
+[Handbook of Integer Sequences lookup, prim version]
+
+It uses programs dehtml3 and getfrom2, which
+are described in more detail in Part 2.
+
+It also mentions some other files (e.g. stripped) which
+are not used at present.
+
+As emails addressed to "sequences@research.att.com" arrive, they are
+piped into this program.
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "hisP"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+#!/bin/sh
+# hisP
+# Version for prim, Nov 06 2008
+
+# Program that automatically answers sequence queries
+# Written by N J A Sloane, Jan-June 1994
+# Modified 6.04.96, 4.23.98 Jan 27 1999
+# Dec 4 2000: calls hisarrange to put seqs into order with "best" ones first
+# Nov 03 2002: allows calls to retrieve a sequence by A-number
+# Jan 08 2003: added time stamp to reply
+# Include original subject line, Jan 08 2003
+# Changed "ex" to /bin/ex ; changed ex - to $ex -s ; Jun 10 2005
+# added awk script to strip off lines from spam guard - Jun 10 2005
+# Oct 26 2007: changed "usr" to "home", prim-ed the program
+# I decided to use grep for simplicity rather than gre,
+# and gawk everywhere rather than a mixture of awk and gawk
+# prim-ed Oct 27 2007
+# Version for prim, Nov 06 2008 - Nov 09 2008
+# Nov 11 2008: added "eval" to the search commands
+# Nov 12 2008: Further changes to search command at suggestion of Dave Applegate
+# Oct 29 2009: I removed the pipe through dehtml3P since it was introducing errors!
+#   For example, it would change A003136 to A0E6 
+
+# The file "header" has the boilerplate that goes at the end
+# The file "footer1" has the message that they get if sequence not found
+# The file "helper.txt" has the help file that they get
+# Calls hisAnumP if they are looking up a sequence number
+# Uses a simple shell program dehtml3 to change weird characters
+# Uses "getfrom" in bin
+
+# TO TEST THIS, I DO THE FOLLOWING
+
+# cp hisP testhis
+# rm jink*
+# set debug = 1 here
+# comment out the trap command
+# uncomment all the (many) "^#if.*debug" lines
+# make a file hiswork67 (say) containing a sequence, such as:
+# From njas
+# lookup 1 2 3 5 8 13 21 34
+# lookup 666665 555455 5667777
+# lookup 1 10 100 1000 10000 100000
+#
+# then type $ cat hiswork67 | testhis
+# look at the jink*** files to monitor progress thru the program
+#
+# remember to set debug = 0 before writing it back onto superasst!
+# and to uncomment the trap command
+# and to comment out the if debug lines
+
+PATH=:/home/njas/bin:/bin:/usr/bin:/usr/local/bin; export PATH
+
+# set parameters, file names etc.
+mach=`uname -n`
+case "$mach"
+in
+        "fry")
+	GETFROM=/home/njas/bin/getfrom
+        DEHTML3=/home/njas/bin/dehtml3F;;
+
+        "prim.research.att.com")
+	GETFROM=/home/njas/bin/getfrom2
+        DEHTML3=/home/njas/bin/dehtml3P;;
+
+esac
+
+ex=/bin/ex		# choose the good ex
+debug=0                 # set = 1 for debugging
+limreq=30		# no. of requests permitted
+limans=50		# set this to maximum responses to each sequence
+
+D1=/home/njas/bin	# define D1 to be this directory
+D2=/home/njas/tmp	# D2 is temp directory
+DA=/home/njas/www-etc/oeis
+DB=$DA/bin
+DD=$DA/search.db
+
+log=$D1/logP		# log is a log file
+#files=`echo /home/njas/gauss/hisdir/catfry23*`; export files
+files=/home/njas/gauss/hisdir/cat25; export files
+                        # "files" is big catalog, a copy of cat25
+stripped=/home/njas/gauss/hisdir/strippedfry
+		# "stripped" is the short catalog (produced by stripfry.1)
+shortbib=/home/njas/gauss/hisdir/shortbib	# plain version of bibliog
+shortbib3=/home/njas/gauss/hisdir/shortnew	# plain version of new refs
+header=$D1/header	# header is the boilerplate that actually goes at the end of the reply
+helper=$D1/helper.txt	# helper is help file to send them
+footer1=$D1/footer1	# message that they get if sequence not found
+orig=$D2/orig.$$	# define orig to be name of file which holds the original request
+req=$D2/request.$$	# define req to be name of file that holds the requested sequences
+tmp=$D2/$$.tmp		# tmp also holds the requested sequences
+tmp2=$D2/$$.tmp2	# another temp file
+tmp3=$D2/$$.tmp3        # another temp file
+tmp4=$D2/$$.tmp4        # another temp file
+trap "rm -f $orig $req $tmp $tmp2 $tmp3 $tmp4; exit" 0 1 2
+			# cleanup when done or interrupted
+date=`date`             # time stamp
+
+cd $D1
+
+###################################
+# capture the input
+###################################
+
+
+# change any weird characters; normalize the word "lookup",
+# strip off lines from spam guard
+# delete any html stuff
+
+# Oct 29 2009: I changed the next line:
+#cat | $DEHTML3 | gawk '
+cat | gawk '
+BEGIN { good = 1 }
+/Content preview:/ { good = 0; next}
+/Content analysis details:/ { good = 1; next }
+good == 0 {next }
+{ print }
+' | sed 's/[Ll][Oo][Oo][Kk]/look/
+           s/[Uu][Pp]/up/
+           s/look  *up/lookup/
+           s/=20$//
+           s/=$//
+	   s/^.*lookup/lookup/
+	   /lookup/s/<.*$//
+           /^</d
+           /^X-/d
+           /ail lookup/d' >$orig
+
+if [ "$debug" -eq 1 ]; then cp $orig jink0001; echo "at 0001"; fi
+
+###################################
+# log the request
+###################################
+(	echo 
+	echo "NEW MESSAGE:"
+	echo 
+	cat $orig 
+)  >> $log
+
+###################################
+# get return address
+###################################
+addr=`$GETFROM < $orig`
+case X$addr in
+  X) echo " " >> $log
+     echo "bad guy" >> $log
+     echo " " >> $log
+     exit 0;;
+#  Xarlin@iquest.com) echo " " >> $log
+#     echo "Arlin Anderson again" >> $log
+#     echo " " >> $log
+#     exit 0;;
+esac
+
+if [ "$debug" -eq 1 ]; then cp $orig jink0002; echo "at 0002"; fi
+if [ "$debug" -eq 1 ]; then echo "addr = " $addr; fi
+
+###################################
+# Capture the original subject line:
+###################################
+SUBJECT_0=`grep "^[Ss][Uu][Bb][Jj][Ee][Cc][Tt]" $orig` 
+
+
+###################################
+# build the reply
+###################################
+# is there a line that just says "lookup" and nothing else?
+if grep "^[Ll]ookup *$" $orig >/dev/null
+then
+#/usr/lib/sendmail -f sequences-reply "$addr" < $helper
+(echo "To: $addr"; echo "Subject: Help file for sequences@research.att.com";
+cat $helper ) | /usr/lib/sendmail -f sequences-reply "$addr"
+
+echo " " >> $log
+echo "I sent the helper file to $addr " >> $log
+echo " " >> $log
+exit 0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $orig jink0003; echo "at 0003"; fi
+
+###################################
+# is format correct?
+###################################
+if grep lookup $orig >/dev/null
+then
+echo " " >/dev/null
+else 
+#/usr/lib/sendmail -f sequences-reply "$addr" < $helper
+(echo "To: $addr"; echo "Subject: Help file for sequences@research.att.com";
+cat $helper ) | /usr/lib/sendmail -f sequences-reply "$addr"
+
+echo " " >> $log
+echo "I sent the helper file to $addr " >> $log
+echo " " >> $log
+exit 0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $orig jink0004; echo "at 0004"; fi
+
+###################################
+#check that there aren't too many requests
+###################################
+noreq=`grep lookup $orig | wc -l`
+if [ "$noreq" -gt "$limreq" ]
+then
+(echo "To: $addr"; echo "Subject: Too many lookups";
+echo "Sorry, only $limreq lookups allowed!";
+echo "To get the help file, send an empty message to sequences@research.att.com" ) | /usr/lib/sendmail -f sequences-reply "$addr"
+#echo Sorry, only $limreq lookups allowed! |
+#	upasname=sequences-reply mail "$addr"
+echo " " >> $log
+echo "Told them too many lookups! " >> $log
+echo " " >> $log
+exit 0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $orig jink0005; echo "at 0005"; fi
+
+###################################
+# process the request
+###################################
+# pull out the lookup lines
+# 4/23/98 I removed the next line from inside the ex command following
+# g/-/s///g  But in the end i put it back
+
+# Oct 27 2007 I'm trying to get the ex script to run properly!
+cp $orig $req
+#cat $orig | awk ' /lookup/ {print }' >$req
+
+if [ "$debug" -eq 1 ]; then cp $orig jink0006; echo "at 0006"; fi
+if [ "$debug" -eq 1 ]; then cp $req jink0006req; fi
+
+$ex -s $req <<!
+g/^</d
+g/LOOKUP/s//lookup/g
+g/Lookup/s//lookup/g
+g/look up/s//lookup/g
+g/LOOK UP/s//lookup/g
+g/Look up/s//lookup/g
+v/lookup/d
+g/[Ss][Uu][Bb][Jj][Ee][Cc][Tt][: ]/s///
+g/^ /s/^  *//
+g/[abcdefghijmnqrstvzABCDEFGHIJKLMNOPQRSTUVWXYZ]/d
+g/lookup/s///
+w!
+q
+!
+
+if [ "$debug" -eq 1 ]; then cp $orig jink001; echo "at 001"; fi
+if [ "$debug" -eq 1 ]; then cp $req jink001req; fi
+
+###################################
+# Added Nov 03 2002. 
+# Are they looking up A-numbers?
+###################################
+#if grep "lookup  *A[0-9][0-9][0-9][0-9][0-9][0-9]" "$orig" >/dev/null
+if grep "lookup  *A[0-9]" "$orig" >/dev/null
+then
+if [ "$debug" -eq 1 ]; then cp $orig jink002; echo "at 002"; fi
+$D1/hisAnumP $addr $orig &
+sleep 1
+exit 0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $req jink001a; echo "at 001a"; fi
+
+###################################
+# check for non-numeric characters in the lookup lines
+###################################
+# 4/23/98 I changed the next line by inserting \055 to allow minus signs
+# but in the end i took it out
+intern1=`cat $req | tr -d " 0123456789\012\055" `
+if [ -n "$intern1" ]
+then
+# echo "Sorry, lookup lines may contain only digits and blanks" |
+#	/usr/lib/sendmail -f sequences-reply "$addr"
+(echo "To: $addr"; echo "Subject: Illegal characters";
+echo "Sorry, lookup lines may contain only digits and blanks";
+echo "To get the help file, send an empty message to sequences@research.att.com" ) | /usr/lib/sendmail -f sequences-reply "$addr"
+
+echo "Told them only digits allowed! " >> $log
+exit 0
+fi
+
+#if [ "$debug" -eq 1 ]; then cp $req jink001b; echo "at 001b"; fi
+
+###################################
+# do further processing
+# David Applegate's version, Nov 12 2008:
+###################################
+cp $req $tmp2
+cat $tmp2 | sed 's/^  *//
+                 s/  *$//
+                 s/  */,/g' >$req
+#if [ "$debug" -eq 1 ]; then cp $req jink002; echo "at 002"; fi
+
+###################################
+# look up all seqs that match 
+###################################
+
+:>$tmp
+cat $req | while read ta; do
+echo "" >>$tmp
+echo "Matches (up to a limit of 50) found for \"$ta\"" >>$tmp
+echo "" >>$tmp
+/home/njas/www-etc/oeis/bin/search -f 3 -q -n 50 /home/njas/www-etc/oeis/search.db "$ta" >>$tmp
+echo "" >>$tmp
+done
+
+#if [ "$debug" -eq 1 ]; then cp $tmp jink003; echo "at 003"; fi
+
+cat $footer1 >>$tmp
+
+# save a copy
+(	echo 
+	echo "MY REPLY to $addr :" 
+	cat $tmp 
+	echo 
+)  >> $log
+
+# Add time stamp and subject line
+echo "Subject line of incoming message (if any): $SUBJECT_0" >>$tmp
+echo " " >>$tmp
+echo "Search was carried out on $date" >>$tmp
+
+# add the boilerplate:
+cat $header >>$tmp
+
+# send off the result:
+# $addr is email address, $tmp contains response
+#cat $tmp | /usr/lib/sendmail -f sequences-reply "$addr"
+
+(echo "To: $addr"; echo "Subject: Reply from On-Line Encyclopedia of Integer Sequences";
+cat $tmp ) | /usr/lib/sendmail -f sequences-reply "$addr"
+
+exit
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+End of the program "hisP"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+
+
+PART 2: SUPERSEEKER
+
+&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+&&&   
+&&&   Summary: Here is a summary of what Superseeker does:
+&&&   
+&&&   - Runs superprocfan (written by Mira Bernstein), 
+&&&       which repeatedly computes inverse binomial
+&&&       transform of the sequence (if these triangles are
+&&&       glued together they form a "fan" - see the Bernstein-Sloane
+&&&       paper on eigensequences). If any of these are recognizable,
+&&&       we have a formula.
+&&&   
+&&&   - Runs proc8 (compiled version of superproc8.f)
+&&&       which tests if differences of some order are periodic
+&&&   
+&&&   - If the sequence only takes two values, a and b say, i.e. is a "binary" sequence,
+&&&       proc9 (compiled version of superproc9.f) computes the
+&&&       six canonical associated sequences and looks them up in the OEIS. 
+&&&       The 6 sequences, all equivalent to the
+&&&       original are: replace a,b by 1,2; by 2,1; positions of a's,
+&&&       of b's; run lengths; and the derivative.
+&&&   
+&&&   - superproc2prim calls the "guessgf" parts of the "gfun" Maple package 
+&&&       of Bruno Salvy and Paul Zimmermann
+&&&       to look for generating functions.
+&&&       See 
+&&&       http://www.maplesoft.com/support/help/Maple/view.aspx?path=gfun
+&&&       or
+&&&       pictor.math.uqam.ca/~plouffe/articles/gfun.pdf 
+&&&       for more about gfun
+&&&   
+&&&   - superproc4prim calls the "listtorec" parts of the "gfun" Maple package 
+&&&       of Bruno Salvy and Paul Zimmermann
+&&&       to look for recurrences.
+&&&   
+&&&   - Uses Harm Derksen's program "superguesss" to try
+&&&       to guess a formula or recurrence.
+&&&       [Harm Derksen's program "guesss" uses Pade'-Hermite approximations
+&&&       - see http://www.maplesoft.com/CyberMath/share/guesss.html.
+&&&       That algorithm is described in:
+&&&       An algorithm to compute generalized Pade'-Hermite forms,
+&&&       Report 9403 (1994), Dept. of Math., Catholic University Nijmegen
+&&&       (available from http://www.math.lsa.umich.edu/~hderksen/preprints/pade.ps).]
+&&&   
+&&&   - Uses Christian Kratthentaler's Mathematica program Rate ("superrate.m") which tries to
+&&&       guess a closed form for a sequence ("rate" is "guess" in German).
+&&&       For a description of Rate, see
+&&&       http://radon.mat.univie.ac.at/People/kratt/rate/rate.html.
+&&&   
+&&&   - Apply many transformations to the sequence and look up
+&&&       the result in the OEIS.
+&&&       The transforms are performed using Mathematica, with the
+&&&       help of Olivier Gerard's program seqtranslib.m
+&&&       A list of the transforms used is in "supertrans".
+&&&   
+&&&   - Apply many transformations to the sequence and look up
+&&&       the result in a table of sequences formed
+&&&       by taking the first differences of all the sequences in the OEIS.
+&&&       Uses the compressed file of the difference sequences, "dripped".
+&&&       The transforms are performed using Mathematica, with the
+&&&       help of Olivier Gerard's program seqtranslib.m
+&&&       A list of the transforms used is in "supertrans".
+&&&   
+&&&   - superproc6prim calls the "listtoalgeq" parts of the "gfun" Maple package 
+&&&       of Bruno Salvy and Paul Zimmermann
+&&&       to look for algebraic equations
+&&&   
+&&&   - Uses superbeattyprim, written by Simon Plouffe,
+&&&       to test if the sequence is a Beatty sequence
+&&&   
+&&&   - Uses John Linderman's program CheckSeq.pl
+&&&       to see if the sequence has a partial overlap with
+&&&       any existing sequence
+&&&   
+&&&   - Uses the unix utility "agrep" to look for sequences in the OEIS
+&&&       that have edit distnce 1, 2 or 3 from the given sequence.
+&&&   
+&&&   - (Not used at present) runs "supercorr2" to look
+&&&       for sequences that are highly correlated with the given sequence.
+&&&   
+&&&   - Several other people have offered the OEIS their programs for guessing 
+&&&       a formula or explanation for a sequence, but I did not
+&&&       have time to incorporate them into Superseeker.
+&&&       Hopefully this can be done on the wiki version.
+&&&   
+&&&   Note that the file "superhelp.txt" included below
+&&&   gives another summary of what Superseeker does.
+&&&   
+&&&   
+&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+
+As emails addressed to "superseeker@research.att.com" arrive, they are
+piped into the program superhisP, and later are fed into superasstprim.
+
+Here is the first program:
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superhisP"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+#!/bin/sh
+# superhisP  Program that automatically answers sequence queries,
+#   trying very hard to find an explanation 
+
+# N. J. A. Sloane 5/2/94
+# uses dehtml, dehtml3
+# all the hard stuff is done by $D1/superasstprim, called at the end of this
+
+# To debug this, set debug=1, comment out the trap command
+# and uncomment all the "if debug ..." statements
+# Then rm jank*, and do something like
+# cat hiswork67 | superhisP, where hiswork67 has 2 lines:
+# From njas
+# lookup 10 20 30 40 0 60 70 80 90 100 110
+# or
+# lookup 220 1210 6655 34243 180829 963886 5093737
+
+# fry version 7/12/96
+# modified 12.30.97 and 3.5.98 and 6/4/99
+# 8/2/99 drop all except first lookup line
+# 6/4/99 added extra lines to put a copy of submission into directory QUEUE. NO!
+# July 19 2002 Line 85 Superseeker broken - Mma not working!
+# Jul 22 2002 Fixed
+# Changed helper file Nov 05 2002
+# Changed "ex" to /bin/ex ; changed ex - to $ex -s ; Jun 10 2005
+# added awk script to strip off lines from spam guard - Jun 10 2005
+# prim-ed Oct 27 2007
+# changed awk to gawk, Oct 27 2007
+# prim version, Nov 09 2008
+# Adding queueing commands, Nov 17 2008
+# Changed a gre to grep, Jul 22 2009 - the filter for supergoodguys
+# wasn't working
+
+# set path
+PATH=:/home/njas/bin:/bin:/usr/bin:/usr/local/bin; export PATH
+
+# set parameters, file names etc.
+mach=`uname -n`
+case "$mach"
+in
+        "fry") GETFROM=/home/njas/bin/getfrom
+	TIMESTAMP=/home/njas/bin/IP27/timestamp
+	DEHTML=/home/njas/bin/dehtml
+	DEHTML3=/home/njas/bin/dehtml3F;;
+
+        "prim.research.att.com") GETFROM=/home/njas/bin/getfrom2
+	TIMESTAMP=/home/njas/bin/x86_64/timestamp
+	DEHTML=/home/njas/bin/dehtmlP
+	DEHTML3=/home/njas/bin/dehtml3P;;
+esac
+
+# temp Nov 02 2007
+#echo "mach = " $mach
+
+ex=/bin/ex              # choose the good ex
+debug=0			# set =1 for debugging
+limreq=1		# no. of requests permitted
+D1=/home/njas/bin	# define D1 to be this directory
+D2=/home/njas/tmp        # D2 is temp directory
+# define directory where jobs are to be queued
+D3=/home/njas/bin/QUEUE
+DA=/home/njas/www-etc/oeis
+DB=$DA/bin
+DD=$DA/search.db
+
+log=$D1/superlogP	# log is a log fileP
+helper=$D1/superhelp.txt	# helper is help file to send people
+orig=$D2/superorig.$$	# define orig to hold the original request
+req=$D2/superreq.$$	# define req to hold the requested sequence
+tmp=$D2/$$.tmp3		# tmp file
+polite=3600		# minimum time in secs between calls
+trap "rm -f $orig $tmp ; exit 0" 0 1 2
+			# cleanup when done or interrupted
+# $addr will have the return address
+
+cd $D1
+
+# CAPTURE THE INPUT
+cat > $tmp
+#if [ "$debug" -eq 1 ]; then cat $tmp >jank000 ; echo "at 000 saving input"; fi
+
+# log 
+(       echo
+        echo "NEW MESSAGE:"
+        echo
+	cat $tmp
+)  >> $log
+
+# GET RETURN ADDRESS USING A NETLIB UTILITY FOR SECURITY
+
+addr=`$GETFROM < $tmp`
+case X$addr in
+  X) echo " " >> $log
+     echo "bad guy" >> $log
+     echo " " >> $log
+     exit 0;;
+esac
+#if [ "$debug" -eq 1 ]; then echo $addr >jank001 ; echo "at 001 got address"; fi
+
+# added Dec 30 1997
+# the 4th sed command below deletes any html garbage lines <....
+
+#if [ "$debug" -eq 1 ]; then cat $tmp | $DEHTML3 >jank002 ; echo "at 002 testing dehtml3"; fi
+#if [ "$debug" -eq 1 ]; then cat $tmp | $DEHTML3 | $DEHTML >jank003 ; echo "at 003 testing DEHTML"; fi
+
+cat $tmp | $DEHTML3 | $DEHTML | gawk '
+BEGIN { good = 1 }
+/Content preview:/ { good = 0; next}
+/Content analysis details:/ { good = 1; next }
+good == 0 {next }
+{ print }
+' | sed 's/Look/look/
+	   s/look up/lookup/
+	   s/LOOKUP/lookup/
+	   s/=20$//
+	   s/=$//
+           /[Ss][Uu][Bb]/d
+           /^</d
+	   /^X-/d
+           /ail lookup/d
+           /lookup/q' >$orig
+#if [ "$debug" -eq 1 ]; then cp $orig jank004; echo "at 004, edited req."; fi
+
+# log the request
+(	echo 
+	echo "after i deleted lots of junk, the message now reads:"
+	echo 
+	cat $orig 
+)  >> $log
+
+# TIME STAMP THE MESSAGE
+
+timein=`$TIMESTAMP`
+#if [ "$debug" -eq 1 ]; then echo $timein >jank005 ; echo "at 005"; fi
+# temp
+#echo timein = $timein
+
+# IS FORMAT CORRECT?  IF NOT SEND "SUPERHELP"
+if grep lookup $orig >/dev/null
+then
+:
+else 
+(echo "To: $addr"; echo "Subject: Help file for Superseeker";
+cat $helper ) | /usr/lib/sendmail -f superseq-reply "$addr"
+
+(	echo 
+	echo "I sent the helper file to $addr " 
+	echo
+)  >> $log
+exit 0
+fi
+
+# PROCESS THE REQUEST # pull out the lookup line
+cp $orig $req
+#if [ "$debug" -eq 1 ]; then cp $req jank006; echo "at 006, editing"; fi
+
+# delete html lines, subject lines, lines containing extraneous letters
+$ex -s $req <<!
+g/^</d
+v/lookup/d
+g/[Ss][Uu][Bb]/d
+g/[abcdefghijmnqrstvzABCDEFGHIJKLMNOPQRSTUVWXYZ]/d
+g/^ /s/^  *//
+w!
+q
+!
+#if [ "$debug" -eq 1 ]; then cp $req jank007; echo "at 007, edited"; fi
+
+#CHECK THAT THERE AREN'T TOO MANY REQUESTS
+noreq=`grep lookup $req | wc -l`
+if [ "$noreq" -gt "$limreq" ]
+then
+#echo "Sorry, only $limreq lookup line allowed in message " |
+#	/usr/lib/sendmail -f superseq-reply "$addr"
+(echo "To: $addr"; echo "Subject: Too many lookups";
+echo "Sorry, only $limreq lookup line allowed in message ";
+echo "To get the help file, send an empty message to superseeker@research.att.com" ) | /usr/lib/sendmail -f superseq-reply "$addr"
+
+(	echo " " 
+	echo "Told them too many lookups! "
+	echo " "
+)	>> $log
+exit 0
+fi
+
+$ex -s $req <<!
+g/lookup/s/lookup//
+w!
+q
+!
+#if [ "$debug" -eq 1 ]; then cp $req jank008; echo "at 008, edited"; fi
+
+# CHECK FOR NON-NUMERIC CHARACTERS IN THE LOOKUP LINE
+if grep '[^-0123456789 ]' $req  >/dev/null
+then
+#echo "Sorry, lookup line may contain only digits, minus signs and blanks" |
+#	/usr/lib/sendmail -f superseq-reply "$addr"
+(echo "To: $addr"; echo "Subject: Illegal characters";
+echo "Sorry, lookup lines may contain only digits, minus signs and blanks";
+echo "To get the help file, send an empty message to superseeker@research.att.com" ) | /usr/lib/sendmail -f superseq-reply "$addr"
+
+echo "Told them only digits allowed! " >> $log
+exit 0
+fi
+#if [ "$debug" -eq 1 ]; then cp $req jank009; echo "at 009"; fi
+
+# FINALLY, DO THEY GET BY THE BOUNCER?
+# if $addr is on list of good guys, accept the request without further checking
+if echo $addr|fgrep -x -f $D1/supergoodguys >/dev/null		#if 1
+then							        # then 1
+	:
+else								# else 1
+# if a new user, set lasttime = 0
+cat supertracker | gawk '{ print $2 }' >$tmp
+if echo $addr|fgrep -x -f $tmp >/dev/null
+then
+ 	lasttime=`grep -h "$addr" $D1/supertracker |
+ 	   gawk '{ print $1 }' | sort -n -r | sed '1q' `
+else
+	lasttime=0
+fi 
+# temp
+#echo lasttime = $lasttime
+# see if it has been an hour since the last request
+ 	  difftime=`expr $timein - $lasttime `
+ 	  if [ "$difftime" -lt "$polite" ]			# if 3
+ 	  then							# then 3
+(echo "To: $addr"; echo "Subject: Too soon since last submission";
+echo "Sorry, because this program consumes a lot of computer time, I must";
+echo "ration its usage to one request per hour per user - please try again later.";
+echo "To get the help file, send an empty message to superseeker@research.att.com" ) | /usr/lib/sendmail -f superseq-reply "$addr"
+ 	  (	echo " " 
+ 		echo "Told them it was too soon since last submission"
+ 		echo " "
+ 	  )	>> $log
+# temp
+#echo difftime = $difftime
+#if [ "$debug" -eq 1 ]; then echo "$timein $lasttime $difftime" >jank010; echo "at 010, getting bounced"; fi
+ 	  exit 0
+ 	  fi							# fi 3
+ 
+fi								# fi 1
+
+#if [ "$debug" -eq 1 ]; then echo "$timein" "$lasttime" "$difftime" >jank011; echo "at 011, past door."; fi
+
+# build the reply
+# THEY GOT IN!
+# record this request in file supertracker
+echo $timein $addr >>$D1/supertracker
+
+# DO FURTHER PROCESSING
+
+$ex -s $req <<!
+g/^/s// /
+g/$/s// /
+g/ /s//,/g
+g/,/s/,,*/,/g
+g/^/s//f /
+w!
+!
+
+# CHECK QUEUED SUBMISSIONS
+
+queuesize=`/bin/ps -u njas | grep superasstprim | wc -l` 
+if [ "$queuesize" -ge 100 ]; then
+  (echo "To: $addr"; echo "Subject: Too many queued submissions";
+  echo "Sorry, the queue is currently full of submissions received ahead of yours."
+  echo "Please try again later.";
+  echo "To get the help file, send an empty message to superseeker@research.att.com" ) | /usr/lib/sendmail -f superseq-reply "$addr" njas@research.att.com
+ 	  (	echo " " 
+ 		echo "Told them the queue was full ($queuesize)"
+ 		echo " "
+ 	  )	>> $log
+  exit 0
+fi
+
+# $addr is the actual address, $req is the name of file with seq in it
+
+#if [ "$debug" -eq 1 ]; then cp $req jank999; echo "at 999, done"; fi
+
+
+nohup $D1/superasstprim $addr $req >> $log 2>&1 &
+
+exit 0
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superasstprim"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+Next, here is the main program, superasstprim:
+
+
+#!/bin/sh
+
+###################################################
+#                                                 #
+#         superasstprim                            #
+#                                                 #
+###################################################
+
+# Program that automatically answers sequence queries,
+#   trying very hard to find an explanation 
+# N. J. A. Sloane 5/16/94
+
+# Fry version 7/12/96
+# 5/97 I have now disconnected the beatty test because it was broken
+# and also (5/7/97) the findhard test because it takes too long
+# 2/28/98 New version of superasstfry replacing findhard with
+# Olivier Gerard's mathematica code and some clever shell programming
+# July 21 1999 I am restoring the Beatty sequence test, but only the "beatty0" part
+# Aug 1 1999  Adding "agrep"
+# Aug 2 Adding guesss
+# Aug 4 Adding RATE
+# 11.26.99 Added "To" lines etc to replies
+# Dec 4 2000: return matches with best ones first
+# Feb 20 2001: always do the "hard" search
+# Aug 13 2002 changing files called "work" to "superwork"
+# Oct 20 2003 Added John Linderman's partial overlap checker, CheckSeq.pl
+# Jul 01 2004 Added tests to see if can match the difference
+#   sequence of any sequence in the OEIS
+# Jun 06 2005 Switched over to good version of ex
+# Jan 03 2007: switched from maple6 to maple9.5
+# Jan 04 2007: switched back, it wasn't working
+# Oct 27 2007: started work on making this compatible with prim
+# Oct 30 2007: Changed "limit" to "ulimit"; changed to $MAPLE, $MATH
+# Nov 02 2007: changed libname command in subprocedures to make gfun work
+# Nov 09 2008: prim version
+# Nov 17 2008: with huge amount of help from Dave Applegate,
+#              added queueing commands
+# Feb 09 2009: changed libpath in the superproc2prim etc files
+# Feb 09 2009: corrected a serious bug in superproc2prim
+
+# TO STUDY A TOUGH SEQUENCE, change maptime = 1000 to maptime = 100000
+#   and set tough = 1 below
+
+#######################################################
+#
+# TO TEST THIS, I DO THE FOLLOWING
+#
+#######################################################
+
+# cp superasstprim testasst
+# rm jonk*
+# IMPORTANT! comment out lines 234-242 (the lockfile stuff) and the trap in line 248
+# set debug = 1 in testasst (at about line 131)
+# make a file superwork66 (say) containing a sequence, such as:
+# f ,1,1,2,3,5,8,13,21,34,
+# make an executable file, superwork1 (say), containing 2 lines:
+#	 cat superwork66 | sed '1q' >superwork6
+#	 testasst njas superwork6
+# or     superasstprim njas superwork6
+#
+# then type superwork1
+# look at the jonk*** files to monitor progress thru the program
+#
+# remember to set debug = 0 before writing it back onto superasstfry!
+
+#######################################################
+#
+# SUBPROGRAMS AND FILES CALLED (in order) (grep for "CALLS")
+#
+#######################################################
+
+# The program superhis reads the mail, then calls this program to
+#	do the hard stuff.
+
+# superfoot*	=	various text files read in at times
+# superproc7fry	=	Maple prog that does initial processing of seq. 
+# superfoot0	=	boilerplate = standard footer 
+# superfoot1	=	text
+# footer2 	= 	boilerplate used if sequence is not in table
+# superproc1	=	look at differences (a Maple subroutine) 
+# superprocfan	=	compute multiple order difference table  (Maple)
+# superproc8.f	=	Fortran program that checks if diffs are periodic
+# proc8 or proc8P (prim) = executable of same
+# superproc9.f	=	Fortran program that gets char fns of binary sequences
+# proc9 or proc9P (prim) = executable of same
+# superproc2fry	=	call guessgf (Maple)
+# superproc2prim	=	call guessgf (Maple)
+# superproc4fry	=	call listtorec (Maple)
+# superproc4prim	=	call listtorec (Maple)
+# superproc6fry	=	call listtoalgeq (Maple)
+# superproc6prim	=	call listtoalgeq (Maple)
+# superguesss	=	my version of Harm Derksen's guesss Maple program  
+# superrate.m	=	my version of rate.m   (Mma)
+# NOT USED superproc3fry	=	call findhard
+# seqtranslib.m is Olivier Gerard's program used by superasstfry (Mma)
+# NOT USED superproc5.f	=	fortran program to decode output of findhard
+# NOT USED proc5	=	executable of same
+# the file "supertrans" has list of transforms used
+# superfoot2 	=	text
+# NOT USED supernearfry	=	look for nearest in L1 norm seqs
+# superbeattyfry	=	test for Beatty seq. (Maple)
+# superbeattyprim	=	test for Beatty seq. (Maple)
+# superfootb 	=	text for beatty
+# hisarrange	=	shell (mostly awk) program that puts core seqs first, etc.
+# qk_fast	=	used by the "transformations" lookup
+# qk_fast_drip	=	used by the "transformations" lookup in the difference table
+
+# these do not appear to be used at present:
+# supercorr	=	look for nearest in correlation seqs
+# superproc10	=	computes first batch of transforms
+# superproc11	=	computes 2nd batch of transforms
+# obsolete now: HISfry in $H/hisdir is Maple script with transformations T___ used
+
+#######################################################
+#
+# SET PARAMETERS, FILE NAMES ETC.
+#
+#######################################################
+
+# ignore SIGHUP (which might occur when the calling program exits,
+# depending on details of mail delivery)
+trap ""  1
+
+# set path:
+PATH=:/home/njas/bin:/bin:/usr/bin:/usr/local/bin:/usr/common/bin/; export PATH
+
+ex=/bin/ex
+#Maple=/usr/local/bin/maple8   # set version of Maple
+#Maple=/usr/local/bin/maple7   # set version of Maple
+#Maple=/usr/local/bin/maple6   # set version of Maple
+#Maple=/usr/local/bin/maple9.5   # set version of Maple
+debug=0			# don't print info (0), or do (1) - for debugging
+tough=1			# set equal to 1 if want to keep analyzing even if seq in table
+			# Feb 2001 default is now 1
+maptime=1000		# max time in secs allowed for the big Maple jobs
+limans=50                # set this to maximum responses to each sequence
+			#  when looking it up in the table
+nocmin=9		# min no of chars needed in 2nd part of prog
+nowmin=3		# min no of words needed in 2nd part of prog
+
+D1=/home/njas/bin	# define D1 to be this directory
+D2=/home/njas/tmp	# put temp files in here
+DA=/home/njas/www-etc/oeis
+DB=$DA/bin
+DD=$DA/search.db
+LOCKWAIT=/usr/bin/lockfile
+LOCKFILE=/home/njas/tmp/super.lock
+
+log=$D1/superlogP	# log is a log file
+#files=`echo /home/njas/gauss/hisdir/catfry23*`; export files
+files=/home/njas/gauss/hisdir/cat25; export files
+			# "files" is big catalog, a copy of cat25
+stripped=/home/njas/gauss/hisdir/strippedfry
+			# "stripped" is short catalog (produced by stripfry.1)
+			# - note the minus signs have been removed
+dripped=/home/njas/gauss/hisdir/drippedfry
+			# "dripped" is short catalog of differences (from stripfry.1)
+			# based on strippedfry_signs
+			# - note the minus signs have been removed
+shortbib=/home/njas/gauss/hisdir/shortbib	# plain version of bibliog
+shortbib3=/home/njas/gauss/hisdir/shortnew	# plain version of new refs
+header=$D1/assthead	# header is the header for my reply
+footer2=$D1/footer2	# asks them to send seq, if not in table
+addr=$1			# addr is return address
+req=$2			# req holds the requested sequence in the f ,1,2,3,4, format
+			# (with signs)
+reqa=$D2/$$.reqa 	# reqa will hold the requested sequence in the f ,1,2,3,4, format
+			# (without signs)
+fort=$D2/$$.fort
+ans=$D2/$$.ans		# ans holds the reply
+tmp=$D2/$$.tmp		# tmp will also hold the requested sequence (without signs)
+tmp2=$D2/$$.tmp2	# another temp file
+tmp3=$D2/$$.tmp3	# another temp file
+tmp4=$D2/$$.tmp4	# another temp file
+tmp5=$D2/$$.tmp5	# another temp file
+tmp6=$D2/$$.tmp6	# another temp file
+
+# other variables:
+# $addr		=	return address
+# $intable	=	1 iff original sequence is in the table
+intable=0
+# $ntable	=	no. of times it was found in the main table
+# $nvals	=	no. of values taken by seq.
+# $maxval	=	max. abs. value in seq.
+# $nterms	=	no. of terms in seq.
+# $periodic	=	1 iff periodic
+# $debug	=	1 to get debugging printouts, 0 if not
+# $f77type	=	1 if fortran can read it, 0 else
+
+mach=`uname -n`
+case "$mach"
+in
+        "fry") 
+	AGREP=agrep
+	BEATTY=$D1/superbeattyfry
+	MAPLE=/usr/local/bin/maple6
+	MATH=/usr/local/bin/math
+	PROC2=$D1/superproc2fry
+	PROC4=$D1/superproc4fry
+	PROC6=$D1/superproc6fry
+	PROC8=$D1/proc8
+	PROC9=$D1/proc9;;
+
+        "prim.research.att.com") 
+	AGREP=/home/njas/bin/agrep
+	BEATTY=$D1/superbeattyprim
+	MAPLE=/usr/local/bin/maple
+	MATH=/usr/common/bin/math
+	PROC2=$D1/superproc2prim
+	PROC4=$D1/superproc4prim
+	PROC6=$D1/superproc6prim
+	PROC8=$D1/proc8P
+	PROC9=$D1/proc9P;;
+
+esac
+
+##################################################################
+#  Wait for lockfile if necessary
+##################################################################
+### In the lockfile command
+### -60 means wait 1 minute between attempts
+### -r 60 means give up after 1 hour of attempts (60 retries)
+### -l 1800 means that if a lock is 30 minutes old, override it
+### -s 60  means to wait 1 minute after overriding a lock
+###
+### Doing it in the while loop means that if superseeker can't get the
+### lock, it sends you email, but continues to try to get the lock.  You
+### can react to the email by fixing the lock problem, or by killing the
+### superseeker process.
+###
+### The trap command should remove the lock if superasstprim exits,
+### or is killed (but not with kill -9 since that doesn't let the process do
+### anything else).
+
+### JUL 21 2009: removed "-l 1800" from 2 LOCKWAIT commands below.  Stale locks
+###    are no longer overridden.
+
+### For debugging, comment out the next 9 lines
+if ! $LOCKWAIT -60 -r 60 -s 60 $LOCKFILE > /dev/null 2>&1; then
+  (echo "To: njas@research.att.com david@research.att.com"; echo "Subject: We have a superseeker lock problem";
+    echo "Process id is $$"; echo "Probably you should either";
+    echo "rm -f $LOCKFILE"; echo "or"; echo "kill $$";
+  ) | /usr/lib/sendmail -f superseeker njas@research.att.com david@research.att.com
+  if ! $LOCKWAIT -60 -r -1 -s 60 $LOCKFILE > /dev/null 2>&1; then
+    exit 0
+  fi
+fi
+
+#trap "rm -f $LOCKFILE; exit 0" 0 2 3 15
+			# debugging cleanup when done or interrupted
+### For debugging, comment out the next line
+trap "rm -f $req $reqa $ans $fort $tmp $tmp2 $tmp3 $tmp4 $tmp5 $tmp6 $LOCKFILE; exit 0" 0 2 3 15
+			# normal cleanup when done or interrupted
+
+#######################################################
+#
+#        START WORK
+#
+#######################################################
+
+cd $D1
+
+
+# WE ENTER WITH THE REQUEST (with signs) IN $req,
+#	held in  f ,1,2,3,4,5,  format
+
+if [ "$debug" -eq 1 ]; then cp $req jonk001; echo "at 001, initial req."; fi
+
+# delete minus signs, put into $tmp and $reqa
+cat $req | tr -d '\055' >$tmp
+cp $tmp $reqa
+if [ "$debug" -eq 1 ]; then cp $tmp jonk002; echo "at 002, - signs gone"; fi
+
+# see if it contains a 0 term
+if grep ",0," $req >/dev/null
+then
+zterm=0    #zterm=0 means it contains a 0
+else
+zterm=1    #zterm=1 means it does not contain a 0
+fi
+
+
+############################################
+#                                          #
+#        CONVERT $req TO MAPLE FORMAT      #
+#                                          #
+############################################
+
+$ex -s $req <<!
+v/f/d
+s/^.../lis:=[ /
+s/.$/]:/
+w
+q
+!
+
+lis_maple=`cat $req`
+
+if [ "$debug" -eq 1 ]; then cp $req jonk002a; echo "at 002a- Maple fmt"; fi
+
+######################################
+#                                    #
+#        PUT HEADER ON MESSAGE       #
+#                                    #
+######################################
+
+sed 's/lis:=/Report on /' <$req >>$ans
+echo "Many tests are carried out, but only potentially useful information
+(if any) is reported here." >>$ans
+echo >>$ans
+
+# IS SEQUENCE TRIVIAL?  CALLS superproc7fry
+# which calls Maple
+
+# temp
+#cp $req jonkjonk1
+# temp
+#echo "$addr" > jonkjonk3
+# temp
+#printenv >jonkjonk4
+# temp
+#set >jonkjonk5
+
+cat $req $D1/superproc7fry | $MAPLE > $tmp4
+#echo "lis := [1,10,20,30,40];"  | $MAPLE > jonkjonk2
+
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonk003; echo "at 003, thru Maple"; fi
+
+# process the output
+$ex -s $tmp4 <<!
+1,/CUT/d
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+g/,/s// /g
+w
+q
+!
+# at this point $tmp4 contains the results from Maple
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonk004; echo "at 004, out of Maple"; fi
+
+# how many values taken, etc. ?
+nvals=`cat $tmp4 | gawk ' /NVALS/ { print $2 }'`
+maxval=`cat $tmp4 | gawk ' /MAXVAL/ { print $2 }'`
+nterms=`cat $tmp4 | gawk ' /NTERMS/ { print $2 }'`
+f77type=`cat $tmp4 | gawk ' /F77TYPE/ { print $2 }'`
+if [ "$debug" -eq 1 ]; then echo "$nvals" "$maxval" "$nterms" "$f77type" > jonk004a; echo "at 004a"; fi
+
+if [ "$nvals" -le 1 ]
+then
+	(	echo
+		echo "REPLY to $addr :"
+		cat $ans
+		echo
+		echo "Constant sequence.  Bye!"
+		echo
+		)  >> $log
+	(	echo
+		echo "Constant sequence.  Bye!"
+		cat $D1/superfoot0
+		echo ) >>$ans
+(echo "To: $addr"; echo "Subject: Reply from superseeker";
+cat $ans ) | /usr/lib/sendmail -f superseq-reply "$addr"
+
+		exit 0
+fi
+
+
+#########################################################
+#
+#    		LOOK UP SEQUENCE IN TABLE
+#
+#########################################################
+
+# FIRST TRY THE TABLE: (uses $tmp (for input), $tmp2, and $tmp3 for the answer)
+# makes a copy of input, $tmp, in $tmp4
+
+if [ "$debug" -eq 1 ]; then cp $tmp jonk0049; echo "at 0049, start lookup"; fi
+
+cp $tmp $tmp4
+echo >$tmp3
+echo "TEST: IS THE SEQUENCE OF ABSOLUTE VALUES IN THE ENCYCLOPEDIA?" >>$tmp3
+
+###################################
+# look up all seqs that match - this is for a single lookup only!
+###################################
+
+#echo "at 49a"
+#cat $tmp | sed 's#^f ,#/home/njas/www-etc/oeis/bin/search
+#         -f 3 -q -n 50 /home/njas/www-etc/oeis/search.db \"#
+#                 s/,$/\"/' >$tmp5
+ta=`cat $tmp | sed 's/^f ,//
+                    s/,$//'`
+if [ "$debug" -eq 1 ]; then echo "at 0049aa, ta = $ta"; fi
+echo "Matches (up to a limit of 50) found for \"$ta\"" >>$tmp3
+echo "" >>$tmp3
+/home/njas/www-etc/oeis/bin/search -f 3 -q -n 50 /home/njas/www-etc/oeis/search.db "$ta" >>$tmp3
+echo "" >>$tmp3
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005; echo "at 005, finished lookup"; fi
+
+if grep "%I" $tmp3 >/dev/null
+then
+# see how many hits
+nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+intable=1
+(	echo
+	echo "        SUCCESS: the sequence is in the OEIS."
+	echo
+	) >>$tmp3
+cat $tmp3 >>$ans
+else
+nhits=0
+intable=0
+fi
+ntable=`expr $nhits`
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk00501; echo "at 00501, out of lookup"; fi
+
+############################################################
+#
+#           IS THE SHORTENED SEQUENCE IN THE TABLE?
+#
+############################################################
+
+# (uses $tmp (for input), $tmp2, and $tmp3 for the answer)
+
+if [ "$debug" -eq 1 ]; then echo "$intable, $nterms" >jonk00502; echo "at 00502, short lookup"; fi
+
+if [ $intable -eq 0 -a $nterms -ge 5 ] 					#if 0
+then									#then 0
+
+# reload $tmp from $tmp4 where it had been saved, deleting first term
+
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonk00503; echo "at 00503, short "; fi
+
+cat $tmp4 | sed 's/,[0123456789]*,/,/' >$tmp
+
+if [ "$debug" -eq 1 ]; then cp $tmp jonk00504; echo "at 00504, edited"; fi
+
+echo >$tmp3
+echo "TEST: IS THE SEQUENCE OF ABSOLUTE VALUES
+(WITH FIRST TERM OMITTED) IN THE ENCYCLOPEDIA?" >>$tmp3
+
+###################################
+# look up all seqs that match - this is for a single lookup only!
+###################################
+
+ta=`cat $tmp | sed 's/^f ,//
+                    s/,$//'`
+if [ "$debug" -eq 1 ]; then echo "at 0049aa, ta = $ta"; fi
+
+echo "Matches (up to a limit of 50) found for \"$ta\"" >>$tmp3
+echo "" >>$tmp3
+/home/njas/www-etc/oeis/bin/search -f 3 -q -n 50 /home/njas/www-etc/oeis/search.db "$ta" >>$tmp3
+echo "" >>$tmp3
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk0051; echo "at 0051, finished lookup"; fi
+
+if grep "%I" $tmp3 >/dev/null
+then
+# see how many hits
+nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+intable=1
+(	echo
+	echo "        SUCCESS: the sequence is in the OEIS."
+	echo
+	) >>$tmp3
+cat $tmp3 >>$ans
+else
+nhits=0
+fi
+ntable=`expr $nhits`
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk0052; echo "at 0052, finished lookup"; fi
+
+fi									#fi 0
+
+
+
+
+##############################################################
+#
+#                     AGREP
+#
+# Aug 01 1999:  adding calls to agrep to look for sequences
+# that almost match
+#
+##############################################################
+
+##############################################################
+#
+#                     AGREP_1
+#
+##############################################################
+
+# (uses $tmp4 (for input), $tmp5, and $tmp3 for the answer)
+
+if [ "$debug" -eq 1 ]; then echo "$intable, $nterms" >jonk005201; echo "at 005201, running agrep1 "; fi
+
+if [ $intable -eq 0 ]		 					#if 0
+then									#then 0
+
+# reload $tmp from $tmp4 where it had been saved with first term deleted
+# and convert it to agrep's format
+lis=`cat $tmp4 | sed 's/...//
+		      s/.$//'`
+
+if [ "$debug" -eq 1 ]; then echo "$lis" >jonk005202; echo "at 005202 "; fi
+
+echo >$tmp3
+echo "SUGGESTION: IT APPEARS THAT THE SEQUENCE OF ABSOLUTE VALUES
+CAN BE OBTAINED FROM THE FOLLOWING SEQUENCE(S) IN THE ENCYCLOPEDIA
+(UP TO A LIMIT OF $limans) BY 1 INSERTION, DELETION OR SUBSTITUTION:" >>$tmp3
+echo " " >> $tmp3
+
+# look up all seqs that match 
+
+$AGREP -1 -k "$lis" $stripped | sed "${limans}q" | 
+  gawk '$2~"^A" {print "cat /home/njas/gauss/hisdir/cat25 | grep \"^%[A-Za-z] " $2 "\"" }'  > $tmp5
+
+if [ "$debug" -eq 1 ]; then cp $tmp5 jonk005203; echo "at 005203, finished agrep_1 lookup"; fi
+
+# Pull out those A numbers from the table
+# and separate entries by spaces
+sh $tmp5 | sed '/^%I/i\
+
+' >>$tmp3
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005204; echo "at 005204, finished sh "; fi
+
+# were there any hits?
+if grep "%I" $tmp3 >/dev/null
+then
+# see how many hits
+nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+echo >>$tmp3
+cat $tmp3 >>$ans
+else
+nhits=0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005205; echo "at 005205, finished agrep_1 lookup"; fi
+if [ "$debug" -eq 1 ]; then echo "nhits = $nhits"; fi
+
+fi									#fi 0
+
+####################################################
+#           END OF AGREP_1
+####################################################
+
+##############################################################
+#
+#                     AGREP_2
+# IS IT DISTANCE 2 FROM SOME SEQUENCE?
+#
+##############################################################
+
+if [ "$nhits" -eq 0 ]							# if 1
+then									# then 1
+
+# (uses $tmp4 (for input), $tmp5, and $tmp3 for the answer)
+
+if [ "$debug" -eq 1 ]; then echo "$intable, $nterms" >jonk005211; echo "at 005211, running agrep2 "; fi
+
+if [ "$debug" -eq 1 ]; then echo "$lis" >jonk005212; echo "at 005212 "; fi
+
+echo >$tmp3
+echo "SUGGESTION: IT APPEARS THAT THE SEQUENCE OF ABSOLUTE VALUES
+CAN BE OBTAINED FROM THE FOLLOWING SEQUENCE(S) IN THE ENCYCLOPEDIA
+(UP TO A LIMIT OF $limans) BY 2 INSERTIONS, DELETIONS OR SUBSTITUTIONS:" >>$tmp3
+echo " " >> $tmp3
+
+# look up all seqs that match 
+
+$AGREP -2 -k "$lis" $stripped | sed "${limans}q" | 
+  gawk '$2~"^A" {print "cat /home/njas/gauss/hisdir/cat25 | grep \"^%[A-Za-z] " $2 "\"" }'  > $tmp5
+
+if [ "$debug" -eq 1 ]; then cp $tmp5 jonk005213; echo "at 005213, finished agrep_2 lookup"; fi
+
+# Pull out those A numbers from the table
+# and separate entries by spaces
+sh $tmp5 | sed '/^%I/i\
+
+' >>$tmp3
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005214; echo "at 005214, finished shell command "; fi
+
+# were there any hits?
+if grep "%I" $tmp3 >/dev/null
+then
+# see how many hits
+nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+echo >>$tmp3
+cat $tmp3 >>$ans
+else
+nhits=0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005215; echo "at 005215, finished agrep_2 lookup"; fi
+
+fi									# fi 1
+
+####################################################
+#           END OF AGREP_2
+####################################################
+
+
+##############################################################
+#
+#                     AGREP_3
+# IS IT DISTANCE 3 FROM SOME SEQUENCE?
+#
+##############################################################
+
+if [ "$nhits" -eq 0 ]							# if 1
+then									# then 1
+
+# (uses $tmp4 (for input), $tmp5, and $tmp3 for the answer)
+
+if [ "$debug" -eq 1 ]; then echo "$intable, $nterms" >jonk005211; echo "at 005211, running agrep_3 "; fi
+
+if [ "$debug" -eq 1 ]; then echo "$lis" >jonk005212; echo "at 005212 "; fi
+
+echo >$tmp3
+echo "SUGGESTION: IT APPEARS THAT THE SEQUENCE OF ABSOLUTE VALUES
+CAN BE OBTAINED FROM THE FOLLOWING SEQUENCE(S) IN THE ENCYCLOPEDIA
+(UP TO A LIMIT OF $limans) BY 3 INSERTIONS, DELETIONS OR SUBSTITUTIONS:" >>$tmp3
+echo " " >> $tmp3
+
+# look up all seqs that match 
+
+$AGREP -3 -k "$lis" $stripped | sed "${limans}q" | 
+  gawk '$2~"^A" {print "cat /home/njas/gauss/hisdir/cat25 | grep \"^%[A-Za-z] " $2 "\"" }'  > $tmp5
+
+if [ "$debug" -eq 1 ]; then cp $tmp5 jonk005213; echo "at 005213, finished agrep_3 lookup"; fi
+
+# Pull out those A numbers from the table
+# and separate entries by spaces
+sh $tmp5 | sed '/^%I/i\
+
+' >>$tmp3
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005214; echo "at 005214, finished shell command "; fi
+
+# were there any hits?
+if grep "%I" $tmp3 >/dev/null
+then
+# see how many hits
+nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+echo >>$tmp3
+cat $tmp3 >>$ans
+else
+nhits=0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005215; echo "at 005215, finished agrep_3 lookup"; fi
+
+fi									# fi 1
+
+####################################################
+#           END OF AGREP_3
+####################################################
+
+
+
+##############################################################
+#
+#                     LINDERMAN
+#
+# Oct 20 2003:  adding call to John P. Linderman's CheckSeq.pl program
+# to look for sequences that partailly overlap
+#
+##############################################################
+
+
+# skip this test if sequence in OEIS already
+if [ $intable -eq 0 ]                                  #if 0
+then                                                                    #then 0
+
+# (uses $tmp4 (for input), $tmp5, and $tmp3 for the answer)
+
+if [ "$debug" -eq 1 ]; then echo "$intable, $nterms" >jonk005221; echo "at 005221, running CheckSeq.pl "; fi
+
+lis=`cat $tmp4 | sed 's/..//'`
+
+if [ "$debug" -eq 1 ]; then echo "$lis" >jonk005222; echo "at 005222 "; fi
+
+echo >$tmp3
+echo "SUGGESTION: JOHN LINDERMAN'S PROGRAM CheckSeq.pl HAS DETECTED
+A PARTIAL OVERLAP BETWEEN YOUR SEQUENCE AND THE FOLLOWING SEQUENCE(S)
+(UP TO A LIMIT OF $limans) IN THE ENCYCLOPEDIA:" >>$tmp3
+echo " " >> $tmp3
+
+# look up all seqs that match 
+
+echo "$lis" | CheckSeq.pl | sed "${limans}q" | sed 's/://' |
+ gawk '$1~"^A" {print "cat /home/njas/gauss/hisdir/cat25 | grep \"^%[A-Za-z] " $1 "\"" }'  > $tmp5
+
+#echo "$lis" | CheckSeq.pl | sed "${limans}q" | sed 's/://' >$tmp5
+
+if [ -s $tmp5 ]					# if 1
+then					# then 1
+if [ "$debug" -eq 1 ]; then cp $tmp5 jonk005223; echo "at 005223, finished CheckSeq.pl"; fi
+
+# Pull out those A numbers from the table
+# and separate entries by spaces
+sh $tmp5 | sed '/^%I/i\
+
+' >>$tmp3
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005224; echo "at 005224, finished sh "; fi
+
+# were there any hits?
+if grep "%I" $tmp3 >/dev/null
+then
+# see how many hits
+nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+echo >>$tmp3
+cat $tmp3 >>$ans
+else
+nhits=0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk005225; echo "at 005225, finished CheckSeq.pl"; fi
+
+fi							#fi 1
+
+fi							# fi 0
+
+####################################################
+#           END OF LINDERMAN
+####################################################
+
+
+######################################################
+#
+#         IS THIS A SERIOUS REQUEST?
+#
+######################################################
+
+noc=`wc -c $req | gawk '{ print $1}'`
+noc=`expr $noc \- 10 `
+now=`cat $req | tr ',' ' ' |wc -w | gawk '{ print $1}'`
+if [ "$noc" -lt "$nocmin" -o "$now" -lt $nowmin ]
+	then
+(       echo
+        echo "REPLY to $addr :"
+        cat $ans
+        echo
+	echo "We need at least $nocmin characters in the sequence
+(counting the separating blanks),
+and at least $nowmin terms, to do any further analysis"
+        echo
+)  >> $log
+(	echo
+	echo "We need at least $nocmin characters in the sequence
+(counting the separating blanks),
+and at least $nowmin terms, to do any further analysis"
+	cat $D1/superfoot0
+	echo ) >>$ans
+	# cat $ans | upasname=superseq-reply mail "$addr"
+#	cat $ans | /usr/lib/sendmail -f superseq-reply "$addr"
+(echo "To: $addr"; echo "Subject: Reply from superseeker";
+cat $ans ) | /usr/lib/sendmail -f superseq-reply "$addr"
+exit 0
+fi 
+
+
+#######################################################
+#
+#	 LOOK AT DIFFERENCES: is sequence a polynomial in n?
+#
+#######################################################
+
+
+# CALLS superproc1
+
+cat $req $D1/superproc1 | $MAPLE > $tmp2
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk006; echo "at 006, checked diffs"; fi
+
+$ex -s $tmp2 <<!
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+w
+q
+!
+
+if grep "good" $tmp2 >/dev/null
+	then
+#get degree  and poly
+$ex -s $tmp2 <<!
+1,/good/d
+w
+q
+!
+deg=`cat $tmp2 | sed '1q' | gawk ' /deg/ {print $2 }'`
+	nhits=`expr $nhits + 1`
+	periodic=1
+	(	echo
+		echo "TEST: IS THE NTH TERM A POLYNOMIAL IN N?"
+		echo "        SUCCESS: nth term is nontrivial polynomial in n of"
+		cat $tmp2
+		echo 
+	)	>>$ans
+	# IS SEQUENCE TRIVIAL?
+		if [ "$deg" -le 2 ]
+		then
+	(	echo
+		echo "REPLY to $addr :"
+		cat $ans
+		echo "Sequence is a polynomial of degree at most 2.  Bye!"
+		echo
+		)  >> $log
+	(	echo
+		echo "Sequence is a polynomial of degree at most 2.  Bye!"
+		cat $D1/superfoot0
+		echo ) >>$ans
+		# cat $ans | upasname=superseq-reply mail "$addr"
+#		cat $ans | /usr/lib/sendmail -f superseq-reply "$addr"
+(echo "To: $addr"; echo "Subject: Reply from superseeker";
+cat $ans ) | /usr/lib/sendmail -f superseq-reply "$addr"
+		exit 0
+		fi
+else
+	periodic=0
+#	(	echo
+#		echo "TEST: IS THE NTH TERM A POLYNOMIAL IN N?"
+#		echo "        FAILURE "
+#		echo 
+#	)	>>$ans
+fi
+
+
+
+
+
+#######################################################
+#
+#     LOOK AT FAN OF DIFFERENCES
+#
+#######################################################
+
+
+# LOOK AT FAN OF DIFFERENCES: is any row essentially constant?
+# CALLS superprocfan
+
+if [ $periodic -eq 0 ]							#if 0
+then
+cat $req $D1/superprocfan | $MAPLE > $tmp2
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk0061; echo "at 0061, checked fan"; fi
+
+$ex -s $tmp2 <<!
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+w
+q
+!
+
+if grep "SUCCESS" $tmp2 >/dev/null
+	then
+# extract answers
+$ex -s $tmp2 <<!
+v/SUCC/d
+g/,/s// /g
+g/\]/s//
+w
+q
+!
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk0062; echo "at 0062, end fan"; fi
+howfar=`cat $tmp2 | sed '1q' | gawk ' /SUCC/ {print $2 }'`
+stratum=`cat $tmp2 | sed '1q' | gawk ' /SUCC/ {print $3 }'`
+s1=`cat $tmp2 | sed '1q' | gawk ' /SUCC/ {print $4 }'`
+s2=`cat $tmp2 | sed '1q' | gawk ' /SUCC/ {print $5 }'`
+s3=`cat $tmp2 | sed '1q' | gawk ' /SUCC/ {print $6 }'`
+s4=`cat $tmp2 | sed '1q' | gawk ' /SUCC/ {print $7 }'`
+	nhits=`expr $nhits + 1`
+	periodic=1
+	(	echo
+echo "SUGGESTION: apparently the differences of order $stratum in the
+difference table of depth $howfar have become constant.
+If this is true then the next four terms of the sequence are:"
+echo "		 $s1, $s2, $s3, $s4"
+		echo 
+	)	>>$ans
+fi
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk0063; echo "at 0063, end fan"; fi
+
+fi									#fi 0
+
+
+
+#######################################################
+#
+#	 GET FORTRAN VERSION
+#
+#######################################################
+
+if [ "$debug" -eq 1 ]; then cp $req jonk007; echo "at 007, getting fortran"; fi
+if [ "$f77type" -eq 1 ] 
+then
+# Next 3 lines Oct 30 2007 to avoid ex troubles on prim
+echo "$nterms" >$fort
+cat $req | sed 's/lis....//
+              s/..$//' | tr "," "\012" >>$fort
+
+#cp $req $fort
+#$ex -s $fort <<!
+#a
+#
+#.
+#g/^....../s///
+#g/..\$/s///
+#g/,/s//\\
+#/g
+#g/ /s///g
+#g/^\$/d
+#0a
+#$nterms
+#.
+#w
+#q
+#!
+
+if [ "$debug" -eq 1 ]; then cp $fort jonk007a; echo "at 007a, have fort."; fi
+fi
+if [ "$debug" -eq 1 ]; then echo "$f77type" >jonk007aa; echo "at 007aa"; fi
+
+
+
+#######################################################
+#
+#	 TEST IF DIFFERENCES ARE PERIODIC - CALLS proc8
+#
+#######################################################
+
+if [ "$f77type" -eq 1 -a $nvals -gt 2 ]					#if 0
+then
+cat $fort | $PROC8 >$tmp
+if  grep "SUCCESS" $tmp > /dev/null					#if 1
+then
+periodic=1
+nhits=`expr $nhits + 1`
+cat $tmp | sed 's/SUCCESS/SUGGESTION/g' >>$ans
+if [ "$debug" -eq 1 ]; then cp $tmp jonk007b; echo "at 007b, diffs periodic"; fi
+fi									#fi 1
+fi									#fi 0
+
+
+
+
+################################################################3
+#
+#              A BINARY SEQUENCE
+#
+################################################################3
+
+# IF BINARY, LOOKUP CHAR FNS - CALLS proc9
+
+if [ $f77type -eq 1 -a $nvals -eq 2 ]                                   #if 0
+then
+
+cat $fort | $PROC9 >$tmp
+# $tmp holds the output from the fortran program
+
+if [ "$debug" -eq 1 ]; then cp $tmp jonk007c; echo "at 007c, binary seq"; fi
+if  grep "FAIL" $tmp > /dev/null						# if 1
+then
+:
+else									# else 1
+	if grep "trivial" $tmp >/dev/null				# if 2
+	then
+$ex -s $tmp <<!
+1,/CUT/d
+w
+q
+!
+if [ "$debug" -eq 1 ]; then cp $tmp jonk007d; echo "at 007d, triv. binary"; fi
+        (       echo
+                echo "REPLY to $addr :"
+                cat $ans
+                echo
+                )  >> $log
+        (       echo
+                cat $tmp
+                echo ) >>$ans
+(echo "To: $addr"; echo "Subject: Reply from superseeker";
+cat $ans ) | /usr/lib/sendmail -f superseq-reply "$addr"
+                exit 0
+	fi								# fi 2
+# nontrivial return from proc9
+cp $tmp $tmp2
+$ex -s $tmp <<!
+1,/CUT/d
+/LAST/,\$d
+w
+q
+!
+cat $tmp >>$ans
+if [ "$debug" -eq 1 ]; then cp $tmp jonk007e; echo "at 007e, nontriv binary"; fi
+# now extract the seqs
+cp $tmp2 $tmp
+$ex -s $tmp <<!
+1,/INTRO/d
+/ZZZZ/,\$d
+g/ /s///g
+g/^f,/s///
+g/,$/s///
+w
+q
+!
+if [ "$debug" -eq 1 ]; then cp $tmp jonk007f; echo "at 007f"; fi
+
+# build up this section of reply in $tmp3
+
+echo >$tmp3
+
+###################################
+# look up all seqs that match - this is for multiple lookups
+###################################
+
+:>$tmp3
+cat $tmp | while read ta; do
+echo "" >>$tmp3
+echo "Matches (up to a limit of 50) found for \"$ta\"" >>$tmp3
+echo "" >>$tmp3
+/home/njas/www-etc/oeis/bin/search -f 3 -q -n 50 /home/njas/www-etc/oeis/search.db "$ta" >>$tmp3
+echo "" >>$tmp3
+done
+
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk007g; echo "at 007g, looked up bins."; fi
+
+if grep "%I" $tmp3 >/dev/null						#fi 2
+then
+# see how many hits
+nfound=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+intable=1
+(	echo
+	echo "        SUCCESS: the sequence is in the OEIS."
+	echo
+	) >>$tmp3
+else									# else 2
+nfound=0
+(	echo
+	echo "        none are in the OEIS. "
+	echo
+)	 >>$tmp3
+fi									# fi 2
+
+nhits=`expr $nhits + $nfound`
+cat $tmp3 >>$ans
+if [ "$debug" -eq 1 ]; then cp $tmp3 jonk007h; echo "at 007h, done with binary"; fi
+fi									#fi 1
+
+fi									#fi 0
+
+
+# was it in OEIS?  if not, ask them to send it
+if [ "$intable" -eq 0 ]
+then
+cat $footer2 >>$ans
+fi
+
+
+################################################################
+#           END OF BINARY SECTION
+################################################################
+
+
+
+################################################################
+#
+#                  GUESSGF
+#
+################################################################
+
+# TRY GUESSGF  (uses $tmp, $tmp2, and $tmp3 for answer )
+# CALLS superproc2fry
+
+ohits=$nhits
+if [ "$debug" -eq 1 ]; then cp $req jonk008; echo "at 008, gfun"; fi
+#echo "TEST: LOOK FOR A GENERATING FUNCTION (WITH GFUN)" >$tmp3
+cat $req $PROC2 >$tmp
+if [ "$debug" -eq 1 ]; then cp $tmp jonk008a; echo "at 008a, gfun"; fi
+(ulimit -t $maptime;  $MAPLE <$tmp >$tmp2 )
+
+if test $? -eq 0 
+then
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk008b; echo "at 008b, gfun ran ok"; fi
+$ex -s $tmp2 <<!
+1,/guessgf/d
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+g/FAIL/d
+g/rror/d
+g/rong/d
+w
+q
+!
+# see how many hits:
+nfound=`grep "gf" $tmp2 | wc -l | gawk '{print $1}'`
+
+if [ "$nfound" -eq 0 ]
+	then
+	:
+#	(	echo
+#		echo "        FAILURE"
+#		echo 
+#	)	>>$ans
+else
+	nhits=`expr $nhits + $nfound`
+	(	echo
+	echo "SUGGESTION: GUESSGF FOUND ONE OR MORE GENERATING FUNCTIONS"
+	echo "WARNING: THESE MAY BE ONLY APPROXIMATIONS!" 
+		echo "Generating function(s) and type(s) are:"
+		echo
+		cat $tmp2
+		echo 
+	)	>>$ans
+fi
+
+else
+if [ "$debug" -eq 1 ]; then cp $req jonk008c; echo "at 008c, gfun died"; fi
+fi
+
+#############################################################
+#      END OF GUESSGF
+#############################################################
+
+
+
+
+#######################################################
+#
+#               TRY LISTTOREC
+#
+#######################################################
+
+# TRY LISTTOREC - CALLS superproc4fry
+
+#echo "TEST: LOOK FOR A RECURRENCE (WITH LISTTOREC)" >>$ans
+(ulimit -t $maptime; cat $req $PROC4 | $MAPLE > $tmp2 )
+
+if test $? -eq 0 
+then
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk009; echo "at 009, listtorec ran ok"; fi
+$ex -s $tmp2 <<!
+1,/listtorec/d
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+g/FAIL/d
+g/rror/d
+g/rong/d
+w
+q
+!
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk009a; echo "at 009a,in  listtorec"; fi
+# see how many hits:
+nfound=`grep "gf" $tmp2 | wc -l | gawk '{print $1}'`
+
+if [ "$nfound" -eq 0 ]
+	then
+	:
+#	(	echo
+#		echo "        FAILURE"
+#		echo 
+#	)	>>$ans
+else
+	nhits=`expr $nhits + $nfound`
+	(	echo
+		echo "SUGGESTION: LISTTOREC FOUND ONE OR MORE RECURRENCES"
+		echo "WARNING: THESE MAY BE ONLY APPROXIMATIONS!" 
+		echo "Recurrence(s) and type(s) are:"
+		echo
+		cat $tmp2
+		echo 
+	)	>>$ans
+fi
+
+else
+if [ "$debug" -eq 1 ]; then cp $req jonk009c; echo "at 009c, listtorec died"; fi
+fi
+
+
+
+
+#######################################################
+#
+#               TRY LISTTOALGEQ
+#
+#######################################################
+
+
+# TRY LISTTOALGEQ - CALLS superproc6fry
+
+if [ "$debug" -eq 1 ]; then cp $req jonk010; echo "at 010, listalgeq"; fi
+#echo "TEST: LOOK FOR AN ALGEBRAIC EQUATION SATISFIED BY THE GENERATING
+#FUNCTION (WITH LISTTOALGEQ)" >>$ans
+cat $req $PROC6 >$tmp
+if [ "$debug" -eq 1 ]; then cp $tmp jonk010a; echo "at 010a, listalgeq"; fi
+(ulimit -t $maptime;  $MAPLE <$tmp >$tmp5 )
+#$MAPLE <$tmp >$tmp5 
+if [ "$debug" -eq 1 ]; then cp $tmp5 jonk010aa; echo "at 010aa, listalgeq ended"; fi
+
+if test $? -eq 0 					#if 3
+then							#then 3
+
+if [ "$debug" -eq 1 ]; then cp $tmp5 jonk010b; echo "at 010b, listtoalgeq ran ok"; fi
+$ex -s $tmp5 <<!
+1,/listto/d
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+g/FAIL/d
+g/rror/d
+g/rong/d
+w
+q
+!
+# see how many hits:
+nfound=`grep "gf" $tmp5 | wc -l | gawk '{print $1}'`
+
+if [ "$nfound" -eq 0 ]					#if 7
+	then						#then 7
+	:
+#	(	echo
+#		echo "        FAILURE"
+#		echo 
+#	)	>>$ans
+else							#else 7
+	nhits=`expr $nhits + $nfound`
+	(	echo
+		echo "SUGGESTION: LISTTOALGEQ FOUND ONE OR MORE ALGEBRAIC
+EQUATIONS SATISFIED BY THE GEN. FN."
+		echo "WARNING: THESE MAY BE ONLY APPROXIMATIONS!" 
+		echo "Equation(s) and type(s) are:"
+		echo
+		cat $tmp5
+		echo 
+	)	>>$ans
+fi							#fi 7
+
+# append types of gen fns?
+if [ $nhits -gt $ohits ]				#if 8
+then							#then 8
+cat $D1/superfoot1 >>$ans
+fi							#fi 8
+
+else							#else 3
+if [ "$debug" -eq 1 ]; then cp $req jonk010c; echo "at 010c, listalgeq died"; fi
+fi							#fi 3
+
+
+####################################################################
+#
+#                 GUESSS                                           #
+#
+####################################################################
+
+
+# TRY GUESSS  (uses $tmp, $tmp2, and $tmp3 for answer )
+# uses superguesss, lis_maple
+
+ohits=$nhits
+
+if [ "$debug" -eq 1 ]; then echo $lis_maple >jonk018; echo "at 018, starting guesss"; fi
+
+(echo $lis_maple; cat $D1/superguesss )>$tmp
+
+if [ "$debug" -eq 1 ]; then cp $tmp jonk018a; echo "at 018a, guesss"; fi
+
+:>$tmp2
+(ulimit -t $maptime;  $MAPLE <$tmp >$tmp2 )
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk018b; echo "at 018b, guesss finished"; fi
+
+if grep "^SUCCESS" $tmp2 >/dev/null							#if0
+then											#then0
+
+if [ "$debug" -eq 1 ]; then echo "at 018c, guesss succeeded"; fi
+
+$ex -s $tmp2 <<!
+1,/^SUCCESS/d
+g/^>/d
+g/^#/d
+g/^byt/d
+w
+q
+!
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk018d; echo "at 018d, "; fi
+
+	nhits=`expr $nhits + 1`
+	(	echo
+echo "TRY \"GUESSS\", HARM DERKSEN'S PROGRAM FOR GUESSING A GENERATING FUNCTION FOR A SEQUENCE."
+		echo
+echo "         Guesss - guess a sequence, by Harm Derksen (hderksen@math.mit.edu)"
+		echo
+		cat $tmp2
+		echo 
+	)	>>$ans
+
+if [ "$debug" -eq 1 ]; then cp $ans jonk018e; echo "at 018e "; fi
+
+else											#else0
+if [ "$debug" -eq 1 ]; then cp $req jonk018f; echo "at 018f, guesss failed"; fi
+fi											#fi0
+
+#############################################################
+#      END OF GUESSGF
+#############################################################
+
+
+
+
+
+####################################################################
+#                                                                #
+#                 RATE                                           #
+#                                                                #
+####################################################################
+
+
+# TRY RATE  (uses $req, $tmp, $tmp2, and $tmp3 for answer )
+# uses superrate.m, lis_maple
+# don't forget $req is the NAME of the file where the "f ,1,2,3,4," seq is stored!
+
+ohits=$nhits
+
+# don't even try if there is a 0 term
+if [ $zterm -eq 0 ]
+then								#then 2
+:
+else								#else 2
+
+lis_mma=`echo $lis_maple | sed 's/......//
+				s/..$//'`
+if [ "$debug" -eq 1 ]; then echo $lis_mma >jonk019; echo "at 019, starting rate"; fi
+
+# make a dummy output file in case rate dies
+echo "In[1]:=
+Out[4]//InputForm= {}
+
+In[5]:=
+Out[5]= back from rate
+" >$tmp
+
+(ulimit -t $maptime; echo " << superrate\`
+\"calling rate\"
+Ratekurz[
+$lis_mma
+]
+InputForm[Out[3]]
+\"back from rate\"
+Quit[]
+" | $MATH -batchout >$tmp )
+
+# save status
+if test $? -ne 0
+then
+zdied=1
+if [ "$debug" -eq 1 ]; then echo "RATE failed, exit status 1"; fi
+else
+zdied=0
+fi
+
+if [ "$debug" -eq 1 ]; then cp $tmp jonk019a; echo "at 019a, rate finished"; fi
+
+# see if have licence problems
+if grep "Contact Wolfram Research" $tmp >/dev/null
+then
+zdied=1
+if [ "$debug" -eq 1 ]; then echo "RATE: Mma failed, licence problems"; fi
+fi
+
+# see if it died because of premature termination
+lll=`wc $tmp | gawk '{print $1}'`
+if test $lll -lt 16
+then
+zdied=1
+if [ "$debug" -eq 1 ]; then echo "RATE: Mma failed, premature termination"; fi
+fi
+
+if test "$zdied" -eq 0				#if0
+then								#then 0
+
+$ex -s $tmp <<!
+1,/InputForm/-1d
+1s/.*= *//
+/{/s///
+/In\[5/,\$d
+/}/s///
+g/i0/s//n/g
+g/^\$/d
+w
+q
+!
+
+if [ "$debug" -eq 1 ]; then cp $tmp jonk019b; echo "at 019b, edited output (will get incomp. line mess.)"; fi
+
+len1=`cat $tmp | wc -c`
+
+if [ "$len1" -gt 0 ]						#if1
+then								#then1
+
+if [ "$debug" -eq 1 ]; then echo "at 019c, rate succeeded"; fi
+
+	nhits=`expr $nhits + 1`
+	(	echo
+echo "TRY \"RATE\", CHRISTIAN KRATTHENTALER'S MATHEMATICA PROGRAM FOR GUESSING A CLOSED FORM FOR A SEQUENCE."
+echo "(\"Rate\" is \"Guess\" in German. For a description of RATE, see"
+echo "http://radon.mat.univie.ac.at/People/kratt/rate/rate.html)"
+echo
+echo "RATE found the following formula for the nth term:"
+echo "Warning: as with all these guessing programs, this is only a suggestion!"
+		echo
+		cat $tmp
+		echo 
+	)	>>$ans
+
+if [ "$debug" -eq 1 ]; then cp $ans jonk019e; echo "at 019e "; fi
+
+else											#else1
+if [ "$debug" -eq 1 ]; then cp $req jonk019f; echo "at 019f, rate failed"; fi
+fi											#fi1
+
+fi											#fi0
+fi											#fi2
+#############################################################
+#      END OF RATE
+#############################################################
+
+
+
+
+#############################################################
+#
+#      HAVE WE DONE ENOUGH?
+#
+#############################################################
+
+if [ "$tough" -eq 0 ]							#if0
+then									#then0
+
+if [ "$nhits" -ge 9 -o "$intable" -eq 1 ]				#if1
+	then								#then1
+(       echo
+        echo "REPLY to $addr :"
+        cat $ans
+	echo "That is probably enough for now.  If this reply
+doesn't satisfy you, try again with more terms!" 
+        echo
+)  >> $log
+(	echo
+	echo "That is probably enough for now.  If this reply
+doesn't satisfy you, try again with more terms!" 
+	cat $D1/superfoot0
+	echo ) >>$ans
+#	cat $ans | /usr/lib/sendmail -f superseq-reply "$addr"
+(echo "To: $addr"; echo "Subject: Reply from superseeker";
+cat $ans ) | /usr/lib/sendmail -f superseq-reply "$addr"
+exit 0
+fi 									#fi1
+
+fi									#fi0
+
+if [ "$debug" -eq 1 ]; then echo "at 010d"; fi
+
+
+
+###########################################################################
+#
+#      APPLY VARIOUS TRANSFORMATIONS TO SEQUENCE                          #
+#
+###########################################################################
+
+# TRY FINDHARD - CALLS superproc3fry 
+# which was later replaced by Olivier Gerard's Mma stuff in superOlivF
+# Now replaced by seqtranslib.m
+
+# tmp3 initially has the Mma output, which will then be overwritten
+# tmp2 contains the 115 or so transformed sequences
+# tmp3 has the matches for one xfmd seq in long form
+# tmp will have the BIG report with all matches found in this section
+# tmp4 will contain the (<= 100 matches) report
+# ans (as above) is the message to be sent to the user
+
+# start report files for report for this section
+:>$tmp
+
+(	echo "TEST: APPLY VARIOUS TRANSFORMATIONS TO SEQUENCE AND LOOK IT
+UP IN THE ENCYCLOPEDIA AGAIN" 
+	echo
+	echo "        SUCCESS"
+	echo "        (limited to 100 matches):"
+	echo) >$tmp4
+
+if [ "$debug" -eq 1 ]; then echo "at 010e"; fi
+
+(ulimit -t $maptime;
+cat "$req" | sed 's/^....../theseq={/' | sed 's/..$/};/' ;
+  echo "Get[\"/home/njas/bin/seqtranslib.m\"];
+        WriteSeekerList[ SuperTrans[theseq], \$Output]; " ) | $MATH -batchout >$tmp3
+
+# see if have licence problems
+if grep "Contact Wolfram Research" $tmp3 >/dev/null
+then
+zdied=1
+if [ "$debug" -eq 1 ]; then echo "FINDHARD: Mma failed, licence problems"; fi
+else
+zdied=0
+fi
+
+# did it run?
+if test "$zdied" -eq 0                                        #if 0
+then                                                     #then 0
+
+cat $tmp3 | sed '/T/!d
+               /T001/s/^.*T/T/
+               /, /s//,/g' > $tmp2
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk10f_tmp2; cp $tmp3 jonk10f_tmp3; echo "at 010f"; fi
+
+##############################################
+# feed the transformed sequences to "search" command 
+##############################################
+
+#:>junkjunk
+
+cat $tmp2 | sort -t" " -u +1 -2 |        # remove duplicates
+   while read T S U; do      # T=transformation no., S=seq, U=null  # do_1
+#echo "$T" >>junkjunk
+#echo "$S" >>junkjunk
+#echo "$U" >>junkjunk
+#echo "" >>junkjunk
+# get length of transformed sequence S in chars
+len1=`echo "$S" | wc -c`
+#echo "len1 = $len1" >>junkjunk
+if [ "$len1" -gt 10 ]		# if_2
+then				# then_2
+#echo "at 010fa"
+echo "Transformation $T gave a match with the following sequences (up to a limit of 10):" >$tmp3
+#echo "at 010fb"
+$DB/search -f 3 -q -n 10 $DD $S >$tmp5
+#echo "at 010fc"
+cat $tmp5 >>$tmp3
+#echo "at 010fd"
+#echo "at 010fd" >>junkjunk
+#cat $tmp5 >>junkjunk
+#echo "at 010fe"
+# exit 0
+# were there any hits for this transformation?
+nhits=`cat $tmp3 | grep "%I" | wc -l`
+#echo "nhits = $nhits" >>junkjunk
+if [ "$nhits" -ge 1 ]		# if_3
+then				# then_3
+cat $tmp3 >>$tmp
+fi				# fi_3
+fi				# fi_2
+                     done          # done_1
+
+# at this point $tmp contains the long results of FINDHARD
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk011; cp $tmp jonk011FR; echo "at 011, math ran ok"; fi
+
+
+# how many hits?
+nfound=`grep "^%I" $tmp | wc -l | gawk '{print $1}'`
+
+#               start of "if" statement Annabel
+if [ $nfound -gt 0 ]
+then                        # "then" of Annabel
+# Yes, there were hits!
+# just keep the first 100 matches
+
+cat $tmp | gawk ' /%I/ { count = count + 1
+                         if ( count > 100 ) 
+                                exit 0
+                         else
+                                print }
+                $0 !~ /%I/ { print } ' >> $tmp4
+
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonk013a; echo "at 013a"; fi
+
+nhits=`expr $nhits + $nfound`
+
+	# pull out T numbers and explain them:
+	echo  >>$tmp4
+	echo "List of transformations used:" >>$tmp4
+	cat $tmp4 | gawk ' /^Transf/ { print $2 }' | sort -u  >$tmp3
+	for i in `cat $tmp3`
+	do
+	grep -h "^$i" $D1/supertrans >>$tmp4
+	done
+	cat $D1/superfoot2 >>$tmp4
+
+	(	echo
+		cat $tmp4
+		echo 
+	)	>>$ans
+fi                               # the "fi" of Annabel
+
+fi							#fi 0
+
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonk014; echo "at 014"; fi
+
+
+#############################################################
+#   END OF TRANSFORMATIONS SECTION                          #
+#############################################################
+
+
+
+
+
+# LOOK FOR CLOSE SEQS IN TABLE - CALLS supernear
+
+#### if [ "$intable" -eq 0 ]						# if 0
+#### then
+#### 
+#### # delete signs!
+#### cat $req | tr -d '\055' >$tmp
+#### # run Maple
+#### cat $tmp $D1/supernear | $MAPLE > $tmp2
+#### 
+#### if [ "$debug" -eq 1 ]; then cp $tmp2 jonk014; echo "at 014, L1 test"; fi
+#### # process the output
+#### ex - $tmp2 <<!
+#### 1,/CLOSEST/d
+#### g/^>/d
+#### g/^#/d
+#### g/^\$/d
+#### \$a
+#### 
+#### .
+#### g/^byt/d
+#### g/,/s///g
+#### g/AA/s/A 1//
+#### w
+#### q
+#### !
+#### 
+#### # at this point $tmp2 contains the results from Maple
+#### 
+#### # how many hits?
+#### nfound=`grep "HIT" $tmp2 | wc -l | gawk '{print $1}'`
+#### 
+#### if [ "$nfound" -eq 0 ]						#if 1
+#### 	then
+#### 	:
+#### #	(	echo
+#### #		echo "        FAILURE"
+#### #		echo
+#### #	)	>>$ans
+#### else								# else 1
+#### 	nhits=`expr $nhits + $nfound`
+#### 	# pull out A numbers , enter them in $tmp3
+#### 	rm -f $tmp4
+#### 	echo  >>$tmp2
+#### 	cat $tmp2 | gawk ' /HIT/ { print $2 }' | sort -u  >$tmp3
+#### 	# get corresponding sequences themselves, put in $tmp4
+#### 	for i in `cat $tmp3`
+#### 	do
+#### 	grep -h "^%[A-Za-z] $i" $files >>$tmp4
+#### 	done
+#### 
+#### # clean up $tmp2
+#### ex - $tmp2 <<!
+#### 0a
+#### TEST: ARE ANY SEQUENCES IN ENCYCLOPEDIA CLOSE IN L1 NORM?
+#### 
+#### SUCCESS
+#### (limited to 3 sequences):
+#### 
+#### .
+#### \$a
+#### 
+#### .
+#### g/HIT/s//L1 distance from sequence/
+#### g/A...... /s//&is /
+#### w
+#### q
+#### !
+#### 
+#### 	echo >>$tmp2
+#### 	echo "List of sequences mentioned:" >>$tmp2
+#### # separate entries by spaces
+#### ex - $tmp4 <<!
+#### a
+#### 
+#### References (if any):
+#### 
+#### .
+#### g/^%I/i \\
+#### 
+#### .
+#### w
+#### q
+#### !
+#### cat $tmp4 >>$tmp2
+#### 
+#### # look for references
+#### cat $tmp4 | gawk ' /^%R/ {
+#### for (i = 3; i <= NF; i = i + 1) print $i
+#### } ' | tr -cd " [a-z][A-Z][0-9]\012" |  sort -u | sed '/^[1-9]/'d >$tmp
+#### for i in `cat $tmp`
+#### do
+#### grep -h "^.$i" $shortbib $shortbib3 >>$tmp2
+#### done
+#### 
+#### 	(	echo
+#### 		cat $tmp2
+#### 		echo 
+#### 	)	>>$ans
+#### fi								# fi 1
+#### 
+#### fi								# fi 0
+#### 
+
+
+
+########################################################
+#
+#                  BEATTY TEST 
+#
+########################################################
+
+if [ "$debug" -eq 1 ]; then cp $req jonk015aaa; echo "at 015aaa, into beatty"; fi
+
+(ulimit -t $maptime; cat $req $D1/superbeattyprim | $MAPLE > $tmp2 )
+
+if test $? -eq 0 
+then
+
+if [ "$debug" -eq 1 ]; then cp $req jonk015aab; echo "at 015aab, beatty ran ok"; fi
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonk015aac; echo "at 015aac"; fi
+
+# did it run?
+if grep "CUT" $tmp2 >/dev/null					#if 0
+then								# then 0
+# process the output
+$ex -s $tmp2 <<!
+1,/CUT/d
+g/^>/d
+g/^#/d
+g/^\$/d
+\$a
+
+.
+g/^byt/d
+g/,/s// /g
+w
+q
+!
+# at this point $tmp2 contains the results from Maple
+
+# how many hits?
+nfound=`grep "BEATTY" $tmp2 | wc -l | gawk '{print $1}'`
+if [ "$debug" -eq 1 ]; then echo $nfound >jonk015a; echo "at 015a"; fi
+
+if [ "$nfound" -eq 0 ]						#if 1
+	then							# then 1
+	:
+#	(	echo
+#		echo "        FAILURE"
+#		echo
+#	)	>>$ans
+else								# else 1
+	nhits=`expr $nhits + $nfound`
+echo "TEST: IS IT A BEATTY SEQUENCE?" >>$ans
+#echo "TEST: IS IT A BEATTY OR QUASI-LINEAR SEQUENCE?" >>$ans
+	echo >>$ans
+
+if grep -h "BEATTY0" $tmp2 >$tmp3
+then
+xxx=`cat $tmp3 | gawk ' { print $3 }'`
+echo SUGGESTION: This appears to be a Beatty sequence [nz] with z approximately "$xxx" >>$ans
+echo >>$ans
+fi
+
+#if grep -h "BEATTY1" $tmp2 >$tmp3
+#then
+#xxx=`cat $tmp3 | gawk ' { print $2 }'`
+#echo SUCCESS: Sequence of partial sums is a Beatty sequence [nz] with z approx "$xxx" >>$ans
+#echo >>$ans
+#fi
+
+#if grep -h "BEATTY2" $tmp2 >$tmp3
+#then
+#echo "SUCCESS: Sequence of partial sums is quasi-linear:
+#correlation with [1,2,3,...] exceeds .999" >>$ans
+#echo >>$ans
+#fi
+
+#if grep -h "BEATTY3" $tmp2 >$tmp3
+#then
+#echo "SUCCESS: Sequence is quasi-linear:
+#correlation with [1,2,3,...] exceeds .999" >>$ans
+#echo >>$ans
+#fi
+
+cat $D1/superfootb >>$ans
+
+fi								# fi 1
+fi								# fi 0
+
+
+else
+if [ "$debug" -eq 1 ]; then cp $req jonk015z; echo "at 015z, beatty died"; fi
+fi
+
+
+##########################################
+#   END OF BEATTY TEST
+##########################################
+
+
+#1112# # Nov 12 2008 I am trying commenting this out
+#1112# ##############################################################
+#1112# #
+#1112# #     DRIPPED TEST =  DIFFERENCE TABLE LOOKUP
+#1112# #
+#1112# # Jul 01 2004  Does sequence match the first difference table?
+#1112# #
+#1112# ##############################################################
+#1112# 
+#1112# 
+#1112# # skip this test if sequence in table already
+#1112# if [ $intable -eq 0 ]                                  #if 0
+#1112# then                                                                    #then 0
+#1112# 
+#1112# # (uses $reqa (for input), $tmp5, and $tmp3 for the answer)
+#1112# 
+#1112# if [ "$debug" -eq 1 ]; then echo "$intable, $nterms" >jonkdrip1; cp $reqa jonkd1a ; echo "at drip1, running dripped test "; fi
+#1112# 
+#1112# echo >$tmp3
+#1112# echo "SUGGESTION: YOUR SEQUENCE APPEARS TO MATCH THE FIRST DIFFERENCES
+#1112# OF THE FOLLOWING SEQUENCE(S) (UP TO A LIMIT OF $limans) IN THE ENCYCLOPEDIA:" >>$tmp3
+#1112# echo " " >> $tmp3
+#1112# 
+#1112# # look up all seqs that match 
+#1112# f(){
+#1112# echo " " >> $tmp3
+#1112# echo "Matches (up to a limit of 50) found for $* :" | tr "," " " >> $tmp3
+#1112# grep -h $* $dripped |
+#1112# awk '$2~"^A" {print "grep -h \"^%[A-Za-z] " $2 "\" $files" }' |
+#1112#         sed "${limans}q" |
+#1112# 	sh >> $tmp3
+#1112# }
+#1112# 
+#1112# . $reqa
+#1112# 
+#1112# if [ "$debug" -eq 1 ]; then cp $tmp3 jonkdrip2; echo "at drip2, finished lookup"; fi
+#1112# 
+#1112# # sort $tmp3 using $tmp5 as temp storage and $tmp6 to hold output
+#1112# gawk -v tf=$tmp5 '
+#1112# BEGIN { head = 1; inside = 0 }
+#1112# # header lines
+#1112# $0 !~ /^Matches/ && head == 1 { print; next }
+#1112# # first "Match"
+#1112# $0 ~ /^Matches/ && head == 1 { print; head = 0; inside = 1; nlines = 0; print("") > tf; next }
+#1112# # inside the message
+#1112# $0 !~ /^Matches/ && inside == 1 { print >>tf; nlines++; next }
+#1112# # a new Match appears
+#1112# $0 ~ /^Matches/ && inside == 1 { 
+#1112# 	if (nlines >= 4)
+#1112# 		system("hisarrange " tf)
+#1112# 	else
+#1112# 		print("")
+#1112# 	print; close(tf); nlines = 0; print("") > tf; next
+#1112# 			       }
+#1112# END { if (nlines >= 4)
+#1112# 	system("hisarrange " tf)
+#1112#       else
+#1112# 	print("")
+#1112#     }
+#1112# ' $tmp3 >$tmp6 
+#1112# 
+#1112# cp $tmp6 $tmp3
+#1112# 
+#1112# # separate entries by spaces
+#1112# $ex -s $tmp3 <<!
+#1112# g/^%I/i \\
+#1112# 
+#1112# .
+#1112# w
+#1112# q
+#1112# !
+#1112# 
+#1112# # were there any hits?
+#1112# if grep "%I" $tmp3 >/dev/null
+#1112# then
+#1112# # see how many hits
+#1112# nhits=`grep "%I" $tmp3 | wc -l | gawk '{print $1}'`
+#1112# (	echo
+#1112# 	echo "        SUCCESS: the sequence matches the differences of a sequence in the OEIS."
+#1112# 	echo
+#1112# 	) >>$tmp3
+#1112# cat $tmp3 >>$ans
+#1112# else
+#1112# nhits=0
+#1112# fi
+#1112# if [ "$debug" -eq 1 ]; then cp $tmp3 jonkdrip3; echo "at drip3, out of lookup"; fi
+#1112# 
+#1112# fi							# fi 0
+#1112# 
+#1112# 
+#1112# ####################################################
+#1112# #           END OF DRIPPED LOOKUP
+#1112# ####################################################
+
+
+
+###########################################################################
+#
+# APPLY VARIOUS TRANSFORMATIONS TO SEQUENCE AND CHECK AGAINST DRIPPED TABLE
+#
+###########################################################################
+
+# TRY FINDHARD - CALLS superproc3fry or rather Oliv stuff (2/98)
+# now replaced by Olivier's math stuff in superOlivF
+
+# APPLY VARIOUS TRANSFORMATIONS TO SEQUENCE AND LOOK IT
+# UP IN THE DIFFERENCE TABLE AGAIN
+# tmp3 initially has the Mma output but will then be overwritten
+# tmp2 contains the 115 or so transformed sequences
+# tmp3 has the matches for one xfmd seq in long form
+# tmp4 will contain the (<= 100 matches) report
+# tmp will have the BIG report
+# ans (as above) = message to user
+
+# start report files for report for this section
+:>$tmp
+
+(	echo "TEST: APPLY VARIOUS TRANSFORMATIONS TO SEQUENCE AND
+CHECK AGAINST FIRST DIFFERENCES OF SEQUENCES IN OEIS"
+	echo
+	echo "        SUCCESS"
+	echo "        (limited to 100 matches):"
+	echo) >$tmp4
+
+if [ "$debug" -eq 1 ]; then echo "at dript1 start of transforms+diff table "; fi
+
+(ulimit -t $maptime;
+cat "$req" | sed 's/^....../theseq={/' | sed 's/..$/};/' ;
+  echo "Get[\"/home/njas/bin/seqtranslib.m\"];
+        WriteSeekerList[ SuperTrans[theseq], \$Output]; " ) | $MATH -batchout >$tmp3
+
+# see if have licence problems
+if grep "Contact Wolfram Research" $tmp3 >/dev/null
+then
+zdied=1
+if [ "$debug" -eq 1 ]; then echo "FINDHARD (diffs): Mma failed, licence problems"; fi
+else
+zdied=0
+fi
+
+# did it run?
+if test "$zdied" -eq 0                                        #if 0
+then                                                     #then 0
+
+cat $tmp3 | sed '/T/!d
+               /T001/s/^.*T/T/
+               /, /s//,/g' > $tmp2
+
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonkdript2; cp $tmp3 jonkdript2a; echo "at dript2"; fi
+
+# feed the transformed sequences to qk_fast 
+cat $tmp2 | sort -t" " -u +1 -2 |        # remove duplicates
+   while read T S U; do      # T=transformation no., S=seq, U=null  # do_1
+# get length of transformed sequence S in chars
+len1=`echo "$S" | wc -c`
+if [ "$len1" -gt 10 ]		# if_2
+then				# then_2
+$D1/qk_fast_drip "$S" >$tmp5
+# were there any hits for this transformation?
+nhits=`cat $tmp5 | grep "A" | wc -l`
+if [ "$nhits" -ge 1 ]		# if_3
+then				# then_3
+#expand: replace the qk_fast results with full sequences
+	echo Transformation "$T" gave a match with first differences of: >$tmp3
+	cat $tmp5 | while read dum1 Anum dum2
+		    do
+# next: do a show Anum here
+$DB/search -f 3 -q id:"$Anum" $S >$tmp5
+#grep "^.. $Anum" /home/njas/gauss/hisdir/cat25 >>$tmp3
+echo "" >>$tmp3
+	       	    done
+cat $tmp3 >>$tmp
+fi				# fi_3
+fi				# fi_2
+                     done          # done_1
+
+# at this point $tmp contains the long results of FINDHARD
+if [ "$debug" -eq 1 ]; then cp $tmp2 jonkdript3; cp $tmp jonkdript3a; echo "at dript3, math ran ok"; fi
+
+# how many hits?
+nfound=`grep "^%I" $tmp | wc -l | gawk '{print $1}'`
+
+#               start of "if" statement Annabel
+if [ $nfound -gt 0 ]
+then                        # "then" of Annabel
+# Yes, there were hits!
+# just keep the first 100 matches
+
+cat $tmp | gawk ' /%I/ { count = count + 1
+                         if ( count > 100 ) 
+                                exit 0
+                         else
+                                print }
+                $0 !~ /%I/ { print } ' >> $tmp4
+
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonkdript4; echo "at dript4"; fi
+
+nhits=`expr $nhits + $nfound`
+
+	# pull out T numbers and explain them:
+	echo  >>$tmp4
+	echo "List of transformations used:" >>$tmp4
+	cat $tmp4 | gawk ' /^Transf/ { print $2 }' | sort -u  >$tmp3
+	for i in `cat $tmp3`
+	do
+	grep -h "^$i" $D1/supertrans >>$tmp4
+	done
+	cat $D1/superfoot2 >>$tmp4
+
+	(	echo
+		cat $tmp4
+		echo 
+	)	>>$ans
+fi                               # the "fi" of Annabel
+
+fi							#fi 0
+
+if [ "$debug" -eq 1 ]; then cp $tmp4 jonkdript5; echo "at dript5"; fi
+
+#############################################################
+#   END OF TRANSFORMATIONS+DRIPPED SECTION                          #
+#############################################################
+
+# FINISHED.  Send off reply
+
+if [ "$debug" -eq 1 ]; then cp $ans jonk999; echo "at 999"; fi
+
+(       echo
+        echo "REPLY to $addr :"
+        cat $ans
+        echo
+)  >> $log
+cat $D1/superfoot0 >>$ans
+(echo "To: $addr"; echo "Subject: Reply from superseeker";
+cat $ans ) | /usr/lib/sendmail -f superseq-reply "$addr"
+
+exit 0
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "dehtml.c", with compiled name dehtmlP
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+#include <stdio.h>
+
+/* dehtml:
+ *
+ * do the following processing on stdin:
+ *
+ *  <.*>  => ""
+ *  &gt;  => '>'
+ *  &lt;  => '<'
+ *  &nbsp;=> ' '
+ *  etc etc etc
+ */
+
+#define MAX_AMPR_LEN (7)
+
+int main(void)
+{
+int c;
+char str[MAX_AMPR_LEN+1];
+int i;
+str[MAX_AMPR_LEN]=0;
+
+while ((c=getchar())!=EOF) {
+  switch(c) {
+  case '<':
+    while ((c=getchar())!=EOF) {
+      if (c=='>') break;}
+    break;
+  case '&':
+    for (i=0;i<MAX_AMPR_LEN;i++) {
+      if ((c=getchar())==EOF) c=0;
+      str[i]=c;
+      if (c==';') {
+        str[i+1]=0;
+        break;}
+      if (c==0) break;}
+    if (c!=';') {
+      printf("&%s",str);}
+    if (!strcmp(str,"gt;")) {
+      printf(">");}
+    else if (!strcmp(str,"lt;")) {
+      printf("<");}
+    else if (!strcmp(str,"nbsp;")) {
+      printf(" ");}
+    else if (!strcmp(str,"amp;")) {
+      printf("&");}
+    else if (!strcmp(str,"eacute;")) {
+      printf("e");}
+    else if (!strcmp(str,"egrave;")) {
+      printf("e");}
+    else if (!strcmp(str,"uacute;")) {
+      printf("u");}
+    else if (!strcmp(str,"ugrave;")) {
+      printf("u");}
+    else if (!strcmp(str,"Uacute;")) {
+      printf("U");}
+    else if (!strcmp(str,"Ugrave;")) {
+      printf("U");}
+    else if (!strcmp(str,"iacute;")) {
+      printf("i");}
+    else if (!strcmp(str,"iuml;")) {
+      printf("i");}
+    else if (!strcmp(str,"igrave;")) {
+      printf("i");}
+    else if (!strcmp(str,"Iacute;")) {
+      printf("I");}
+    else if (!strcmp(str,"Igrave;")) {
+      printf("I");}
+    else if (!strcmp(str,"aacute;")) {
+      printf("a");}
+    else if (!strcmp(str,"agrave;")) {
+      printf("a");}
+    else if (!strcmp(str,"oacute;")) {
+      printf("o");}
+    else if (!strcmp(str,"ograve;")) {
+      printf("o");}
+    else if (!strcmp(str,"ouml;")) {
+      printf("oe");}
+    else if (!strcmp(str,"Eacute;")) {
+      printf("E");}
+    else if (!strcmp(str,"Egrave;")) {
+      printf("E");}
+    else if (!strcmp(str,"Aacute;")) {
+      printf("A");}
+    else if (!strcmp(str,"Agrave;")) {
+      printf("A");}
+    else if (!strcmp(str,"Auml;")) {
+      printf("Ae");}
+    else if (!strcmp(str,"Oacute;")) {
+      printf("O");}
+    else if (!strcmp(str,"Ograve;")) {
+      printf("O");}
+    else if (!strcmp(str,"Ouml;")) {
+      printf("Oe");}
+    else if (!strcmp(str,"Uuml;")) {
+      printf("Ue");}
+    else if (!strcmp(str,"quot;")) {
+      printf("\"");}
+    else {
+      printf("&%s",str);}
+    break;
+  default:
+    putchar(c);
+    break;}}
+if (c!='\n') printf("\n");
+return(0);
+}
+
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "dehtml3P"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+#!/bin/ksh
+# dehtml3P = dehtml3 for prim    Converts 8-bit extended ascii to simple english
+# checked Oct 26 2007
+
+# THIS IS USED BY hisP  and superhisP SO DON'T MESS WITH IT!
+
+#  Put (most of) all the weird characters into shell variables
+hA0=`echo -e '\0240'`
+hA1=`echo -e '\0241'`
+hA2=`echo -e '\0242'`
+hA3=`echo -e '\0243'`
+hA4=`echo -e '\0244'`
+hA5=`echo -e '\0245'`
+hA6=`echo -e '\0246'`
+hA7=`echo -e '\0247'`
+hA8=`echo -e '\0250'`
+hA9=`echo -e '\0251'`
+hAA=`echo -e '\0252'`
+hAB=`echo -e '\0253'`
+hAC=`echo -e '\0254'`
+hAD=`echo -e '\0255'`
+hAE=`echo -e '\0256'`
+hAF=`echo -e '\0257'`
+hB0=`echo -e '\0260'`
+hB1=`echo -e '\0261'`
+hB2=`echo -e '\0262'`
+hB3=`echo -e '\0263'`
+hB4=`echo -e '\0264'`
+hB5=`echo -e '\0265'`
+hB6=`echo -e '\0266'`
+hB7=`echo -e '\0267'`
+hB8=`echo -e '\0270'`
+hB9=`echo -e '\0271'`
+hBA=`echo -e '\0272'`
+hBB=`echo -e '\0273'`
+hBC=`echo -e '\0274'`
+hBD=`echo -e '\0275'`
+hBE=`echo -e '\0276'`
+hBF=`echo -e '\0277'`
+hC0=`echo -e '\0300'`
+hC1=`echo -e '\0301'`
+hC2=`echo -e '\0302'`
+hC3=`echo -e '\0303'`
+hC4=`echo -e '\0304'`
+hC5=`echo -e '\0305'`
+hC6=`echo -e '\0306'`
+hC7=`echo -e '\0307'`
+hC8=`echo -e '\0310'`
+hC9=`echo -e '\0311'`
+hCA=`echo -e '\0312'`
+hCB=`echo -e '\0313'`
+hCC=`echo -e '\0314'`
+hCD=`echo -e '\0315'`
+hCE=`echo -e '\0316'`
+hCF=`echo -e '\0317'`
+hD0=`echo -e '\0320'`
+hD1=`echo -e '\0321'`
+hD2=`echo -e '\0322'`
+hD3=`echo -e '\0323'`
+hD4=`echo -e '\0324'`
+hD5=`echo -e '\0325'`
+hD6=`echo -e '\0326'`
+hD7=`echo -e '\0327'`
+hD8=`echo -e '\0330'`
+hD9=`echo -e '\0331'`
+hDA=`echo -e '\0332'`
+hDB=`echo -e '\0333'`
+hDC=`echo -e '\0334'`
+hDD=`echo -e '\0335'`
+hDE=`echo -e '\0336'`
+hDF=`echo -e '\0337'`
+hE0=`echo -e '\0340'`
+hE1=`echo -e '\0341'`
+hE2=`echo -e '\0342'`
+hE3=`echo -e '\0343'`
+hE4=`echo -e '\0344'`
+hE5=`echo -e '\0345'`
+hE6=`echo -e '\0346'`
+hE7=`echo -e '\0347'`
+hE8=`echo -e '\0350'`
+hE9=`echo -e '\0351'`
+hEA=`echo -e '\0352'`
+hEB=`echo -e '\0353'`
+hEC=`echo -e '\0354'`
+hED=`echo -e '\0355'`
+hEE=`echo -e '\0356'`
+hEF=`echo -e '\0357'`
+hF0=`echo -e '\0360'`
+hF1=`echo -e '\0361'`
+hF2=`echo -e '\0362'`
+hF3=`echo -e '\0363'`
+hF4=`echo -e '\0364'`
+hF5=`echo -e '\0365'`
+hF6=`echo -e '\0366'`
+hF7=`echo -e '\0367'`
+hF8=`echo -e '\0370'`
+hF9=`echo -e '\0371'`
+hFA=`echo -e '\0372'`
+hFB=`echo -e '\0373'`
+hFC=`echo -e '\0374'`
+hFD=`echo -e '\0375'`
+hFE=`echo -e '\0376'`
+hFF=`echo -e '\0377'`
+
+# run sed to do the conversion
+sed "s/${hA0}/ /g
+s/${hA1}/!/g
+s/${hA2}/c/g
+s/${hA3}/L/g
+s/${hA4}/o/g
+s/${hA5}/Y/g
+s/${hA6}/|/g
+s/${hA7}/ss/g
+s/${hA8}/\"/g
+s/${hA9}/C/g
+s/${hAA}/@/g
+s/${hAB}/\"/g
+s/${hAC}/!/g
+s/${hAD}/-/g
+s/${hAE}/R/g
+s/${hAF}/-/g
+s/${hB0}/deg/g
+s/${hB1}/+-/g
+s/${hB2}/^2/g
+s/${hB3}/^3/g
+s/${hB4}/\'/g
+s/${hB5}/mu/g
+s/${hB6}/ /g
+s/${hB7}/./g
+s/${hB8}/ /g
+s/${hB9}/^1/g
+s/${hBA}/o/g
+s/${hBB}/\"/g
+s/${hBC}/1\/4/g
+s/${hBD}/1\/2/g
+s/${hBE}/3\/4/g
+s/${hBF}/?/g
+s/${hC0}/A/g
+s/${hC1}/A/g
+s/${hC2}/A/g
+s/${hC3}/A/g
+s/${hC4}/A/g
+s/${hC5}/A/g
+s/${hC6}/AE/g
+s/${hC7}/C/g
+s/${hC8}/E/g
+s/${hC9}/E/g
+s/${hCA}/E/g
+s/${hCB}/E/g
+s/${hCC}/I/g
+s/${hCD}/I/g
+s/${hCE}/I/g
+s/${hCF}/I/g
+s/${hD0}/TH/g
+s/${hD1}/N/g
+s/${hD2}/O/g
+s/${hD3}/O/g
+s/${hD4}/O/g
+s/${hD5}/O/g
+s/${hD6}/O/g
+s/${hD7}/*/g
+s/${hD8}/O/g
+s/${hD9}/U/g
+s/${hDA}/U/g
+s/${hDB}/U/g
+s/${hDC}/U/g
+s/${hDD}/Y/g
+s/${hDE}/TH/g
+s/${hDF}/ss/g
+s/${hE0}/a/g
+s/${hE1}/a/g
+s/${hE2}/a/g
+s/${hE3}/a/g
+s/${hE4}/a/g
+s/${hE5}/a/g
+s/${hE6}/ae/g
+s/${hE7}/c/g
+s/${hE8}/e/g
+s/${hE9}/e/g
+s/${hEA}/e/g
+s/${hEB}/e/g
+s/${hEC}/i/g
+s/${hED}/i/g
+s/${hEE}/i/g
+s/${hEF}/i/g
+s/${hF0}/th/g
+s/${hF1}/n/g
+s/${hF2}/o/g
+s/${hF3}/o/g
+s/${hF4}/o/g
+s/${hF5}/o/g
+s/${hF6}/o/g
+s/${hF7}/\//g
+s/${hF8}/o/g
+s/${hF9}/u/g
+s/${hFA}/u/g
+s/${hFB}/u/g
+s/${hFC}/u/g
+s/${hFD}/y/g
+s/${hFE}/th/g
+s/${hFF}/y/g
+"
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "getfrom.c", with compiled name getfrom2
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+/*
+ *  To compile:  cc -o getfrom -DSTANDALONE getfrom.c
+ *  To run:      getfrom < {mailmessage}
+ * The author of this software is Eric Grosse. Copyright (c)1985,1994 by AT&T.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose without fee is hereby granted, provided that this entire notice
+ * is included in all copies of any software which is or includes a copy
+ * or modification of this software and in all copies of the supporting
+ * documentation for such software.
+ * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR IMPLIED
+ * WARRANTY.  IN PARTICULAR, NEITHER THE AUTHORS NOR AT&T MAKE ANY
+ * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY
+ * OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR PURPOSE.
+ */
+
+#include <stdio.h>
+#include <string.h>
+
+int
+unsafe(char *s)
+{
+	char c;
+	/* check for characters interpreted by the shell (by which nefarious
+           users might otherwise break into the system) */
+	for (c = (*s); c != '\0'; c = (*++s)) {
+		if ( strchr("\"'`$\n;&|^<>()\\", c) || (c & 0200) ){
+			fprintf(stderr,"unsafe(%s) saw %c\n",s,c);
+			return(1);
+		}
+	}
+	return(0);
+}
+
+
+/*
+ * EXTRACT SENDER'S ADDRESS OUT OF RFC822 "FROM" LINE
+ *  The sender is either the next first whitespace delimited token or
+ *  the first thing enclosed in "<" ">".
+ *  (leading "From: " is already deleted before entry)
+ *  adapted from /n/bowell/src/cmd/upas (Dave Presotto)
+ *  modified by Eric Grosse to stop after comma and to allow nested parens
+ */
+int   /* 0 on success, 1 if address is unparseable or unsafe */
+getfrom(char *line, char *sender)
+{
+	char	*lp, *sp;
+	int	comment = 0;
+	int	anticomment = 0;
+
+	sp = sender;
+	for (lp = line; *lp; lp++) {
+		if (comment) {
+			if (*lp == ')') {
+				comment--;
+			} else if (*lp == '(') {
+				comment++;
+			}
+			continue;
+		}
+		if (anticomment) {
+			if (*lp == '>')
+				break;
+		}
+		switch (*lp) {
+		case '\t':
+		case '\n':
+			break;
+		case ' ':
+			if (strncmp(lp, " at ", sizeof(" at ") - 1) == 0 ||
+				strncmp(lp, " AT ", sizeof(" AT ") - 1) == 0 ) {
+				*sp++ = '@';
+				lp += sizeof(" at ") - 2;
+			}
+			break;
+		case '<':
+			anticomment = 1;
+			sp = sender;
+			break;
+		case '(':
+			comment++;
+			break;
+		case ',':  /* looks like multiple address; chop */
+			*sp++ = '\0';
+		default:
+			*sp++ = *lp;
+			break;
+		}
+	}
+	*sp = '\0';
+	if(!*sender || unsafe(sender)) return 1;
+	return 0;
+}
+
+
+#ifdef STANDALONE
+#define LINESIZE 1026
+char	line[LINESIZE]; /* raw input line */
+char	from[LINESIZE]; /* unfolded from line */
+char	address[LINESIZE]; /* return address */
+
+/* like gets(), but safe */
+char *
+getsn(s,m)
+	char *s;
+	int m;
+{
+	if(fgets(s,m,stdin)==NULL)
+		return(NULL);
+	m = strlen(s)-1;
+	if(s[m]=='\n')
+		s[m] = '\0';
+	return(s);
+}
+
+/* case independent prefix compare */
+int
+cicmp(char *s1, char *s2)
+{
+        int c1, c2;
+
+        for(; *s1; s1++, s2++){
+                c1 = *s1;
+                c2 = isupper(*s2) ? tolower(*s2) : *s2;
+                if (c1 != c2)
+                        return -1;
+        }
+	return(0);
+}
+
+void
+main(int argc, char**argv)
+{
+	int	inside = 0, replyto = 0;
+	char	c, *p;
+
+	while(getsn(line, LINESIZE) != NULL){
+		c = line[0];
+		if(inside){ /* unfolding */
+			if( c==' ' || c=='\t' ){
+				if( strlen(line) + strlen(from) >= LINESIZE ){
+					fprintf(stderr,"From line too long\n");
+					exit(1);
+				}
+				strcat(from, line);
+				continue;
+			}else{ /* not a continuation */
+				inside = 0;
+			}
+		}
+		if ( c == '\0' ) {
+			break;	/* end of mail header */
+		}else if(!replyto && strncmp("From ",line,5)==0){
+			strcpy(from, line + 5);
+			if(p = strchr(from,' ')) *p = '\0';  /* chop date */
+		}else if(strlen(line)>9 && cicmp("reply-to:",line)==0){
+			strcpy(from, line + 9);
+			inside = 1;
+			replyto = 1;
+		}else if(!replyto && strlen(line)>5 && cicmp("from:",line)==0){
+			strcpy(from, line + 5);
+			inside = 1;
+		}
+	}
+	if(getfrom(from, address))
+		exit(1);
+	puts(address);
+	exit(0);
+}
+#endif
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "CheckSeq.pl
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+
+#!/usr/common/bin/perl.new -w
+
+# CRC=4110317807
+
+use strict;
+use FileHandle;
+
+my $SeqFile = $ENV{SEQFILE} || '/home/njas/gauss/hisdir/strippedfry';
+my $MinTerms = $ENV{MINTERMS} || 0;
+$MinTerms = 20 unless ($MinTerms >= 1);
+
+# %S A088674 ,1,3,6,45,126,750,2796,19389,75894,449562,2027796,12211794,57895596,332787324,1677545304,9766642077,50378641830,286825948194,1529968671492,8729259097158,47374697101572,269062276076868,1484430536591592,
+# %S A088675 ,0,1,2,8,36,160,656,2368,7664,29440,184896,1174272,3395200,21222400,178961920,1638189056,27449296640,28875071488,3234263731200,10138343231488,422012179953664,3426627065331712,59293997091528704,
+# %S A088676 ,1,2,2,2,3,3,3,3,4,4,5,5,5,5,6,6,6,6,6,6,7,7,8,9,9,9,9,9,9,9,10,11,12,12,14,
+# %S A088677 ,2,1,2,3,1,2,5,6,2,5,1,4,5,11,6,9,10,11,13,14,8,17,11,4,11,16,19,20,22,27,16,22,4,23,24,
+# %S A088679 ,0,1,2,6,48,2880,9953280,115579079884800,15266884236590834264309760000,262212473580148912869121218589990322256745385164800000000,
+# %S A088682 ,4,6,10,10,10,8,8,14,6,18,8,8,10,12,6,16,10,16,8,6,18,18,12,14,10,12,12,8,14,6,12,10,20,16,8,12,12,14,6,8,10,18,14,12,12,24,12,6,18,18,6,12,12,20,12,18,8,8,12,24,6,14,28,18,12,16,8,22,6,8,6,8,12,28,6,14,8,12,6,24,
+# %S A088683 ,6,6,8,6,12,10,10,12,6,18,12,12,12,12,14,6,8,12,8,12,6,20,6,14,10,12,12,10,12,16,12,18,24,12,16,8,10,22,10,14,14,18,12,14,12,22,12,12,6,18,24,18,10,18,14,16,12,16,12,22,10,14,24,18,14,10,8,28,10,10,16,40,14,24,6,
+# %S A088684 ,6,6,8,6,8,6,10,6,6,10,12,10,8,6,24,6,12,12,10,24,6,16,10,12,14,18,12,10,6,20,12,14,16,8,16,8,6,12,12,16,18,18,10,10,18,14,6,24,6,6,24,18,12,10,14,10,12,12,8,6,12,12,12,16,20,12,18,20,8,6,14,40,26,18,10,6,22,6,
+# %S A088680 ,2,4,4,4,2,4,4,6,6,2,4,8,2,2,14,6,10,6,4,6,10,4,12,4,4,2,6,6,6,2,14,2,14,10,4,8,6,6,4,10,10,6,6,4,4,8,8,6,2,6,6,2,10,6,6,4,12,2,6,2,4,8,8,8,6,8,4,4,10,2,2,2,14,2,14,2,20,8,8,6,14,6,8,12,6,10,6,2,2,18,2,6,8,6,2,
+# %S A088681 ,2,2,2,6,6,2,6,2,4,6,6,4,4,4,4,2,2,6,6,2,2,2,12,2,6,10,6,2,4,10,4,4,6,2,6,6,4,8,8,2,2,4,8,2,12,4,4,12,18,10,6,6,6,2,6,2,10,4,6,12,6,10,10,6,4,6,8,14,12,10,4,10,4,4,4,4,4,10,4,6,4,6,6,4,2,2,10,10,6,4,4,6,6,22,10,
+
+
+# Each element may occur at more than one position.
+# Index a hash by element, and store a hash of the positions
+# at which that element occurs.
+
+sub hash_elements {
+    my $elem_ref = shift;
+    my ($i, %hash);
+
+    for ($i = 0; $i < @$elem_ref; ++$i) {
+	$hash{$elem_ref->[$i]}{$i} = 1;
+    }
+    return \%hash;
+}
+
+
+# To constitute a valid overlap,
+# a) one sequence must start (or end) within the other, and
+# b) the rest (or previous part) of that sequence must match
+#    until either sequence is exhausted
+# The qhash allows quick checks for presence of an element
+# in the query sequence, and, if present, where it occurs.
+
+sub check_overlap {
+    my ($seqno, $need, $qhash, $qelem, $elems) = @_;
+    my ($elem, $posns, $posn, $span, $i);
+
+    $need = @$elems if ($need > @$elems);
+    $elem = $elems->[0];	# Maybe other starts somewhere in query
+    if (exists($qhash->{$elem})) {
+	$posns = $qhash->{$elem};
+POS1:
+	foreach $posn (sort {$a <=> $b} keys(%$posns)) {
+	    $span = (@$qelem - $posn);	# How much of query sequence follows
+	    $span = @$elems if (@$elems < $span);	# other ends first
+	    last unless ($span >= $need);	# Too short and getting shorter
+	    for ($i = 1; $i < $span; ++$i) {	# index 0 known to match
+		next POS1 unless ($qelem->[$posn + $i] eq $elems->[$i]);
+	    }
+	    print("$seqno: $posn 0 $span\n");
+	    return;
+	}
+    }
+    $elem = $elems->[-1];	# Maybe other ends somewhere in query
+    if (exists($qhash->{$elem})) {
+	$posns = $qhash->{$elem};
+POS2:
+	foreach $posn (sort {$b <=> $a} keys(%$posns)) {
+	    $span = $posn + 1;	# Length of query sequence ending here
+	    $span = @$elems if (@$elems < $span);	# other starts later
+	    last unless ($span >= $need);	# Too short and getting shorter
+	    for ($i = $span; --$i > 0; ) {
+		next POS2
+		    unless ($qelem->[$posn - $i] eq $elems->[-$i - 1]);
+	    }
+	    $posn -= $span - 1;		# first query position in match
+	    $i = @$elems - $span;	# first position in other
+	    print("$seqno: $posn $i $span\n");
+	    return;
+	}
+    }
+    return;
+}
+
+
+sub main {
+    my $fh = new FileHandle;
+    my ($qline, $line, @query_elem, $query);
+    my ($seqno, @elems, $seq, $need);
+    my ($i, $posn, $span);
+
+    open($fh, "< $SeqFile") || die("Open failed on sequence file $SeqFile: $!");
+    while ($qline = <>) {
+	chomp($qline);
+	@query_elem = split(/[^-0-9]+/ , $qline);
+	shift(@query_elem) while (@query_elem && ($query_elem[0]  !~ /\d+/));
+	pop(@query_elem)   while (@query_elem && ($query_elem[-1] !~ /\d+/));
+	if (@query_elem) {
+	    $qline = join(',' => '', @query_elem, '');
+	    $query = hash_elements(\@query_elem);
+	    $need = (@query_elem <= 1.2 * $MinTerms) ?
+			int(.75 * @query_elem) : $MinTerms;
+	    $need = 1 if ($need < 1);
+	    seek($fh, 0, 0) || die("Rewind failed on $SeqFile: $!");
+	    while ($line = <$fh>) {
+		(undef, $seqno, $seq) = split(" ", $line);
+		if (($i = index($seq, $qline)) >= 0) {
+		    $posn = ($i == 0) ? 0 : (substr($seq, 0, $i-1) =~ tr/,//);
+		    $span = @query_elem;
+		    print("$seqno: 0 $posn $span\n");
+		    next;
+		}
+		# Trailing empty field won't be included
+		@elems = split(',' => $seq);
+		shift(@elems);	# Eliminate empty leading field
+		check_overlap($seqno, $need, $query, \@query_elem, \@elems)
+		    if (@elems);
+	    }
+	}
+    }
+}
+main();
+
+__END__
+
+=head1 NAME
+
+CheckSeq.pl - Check query sequences against sequence database
+
+=head1 SYNOPSIS
+
+CheckSeq.pl F<query-file> ...
+
+=head1 EXAMPLE
+
+  # Run queries against standard database
+  CheckSeq.pl queries
+  # Same, but reset minimum overlap threshold
+  MINTERMS=10 CheckSeq.pl queries
+  # Use a different sequence database
+  SEQFILE=/some/other/database CheckSeq.pl queries
+
+=head1 DESCRIPTION
+
+B<CheckSeq.pl> reads query sequences,
+one per line, from the specified F<query-file>s,
+or from F<standard in> if no F<query-file>s are specified.
+For each sequence in the sequence database
+that "overlaps adequately" with a query sequence,
+a one-line summary resembling the following is produced.
+
+  A088676: 3 0 34
+
+The first value is the name of the matching sequence from
+the sequence database.  The three numeric values that follow are
+
+=over 4
+
+=item 1
+
+The position (starting at B<0>) in the query match
+of the overlapping subsequence.
+
+=item 2
+
+The position (starting at B<0>) in the database sequence
+of the overlapping subsequence.
+
+=item 3
+
+The length of the overlapping subsequence.
+
+=back 4
+
+Roughly speaking, two sequences I<overlap>
+if you can "line up" the elements of the sequences
+so they agree on some terms, and disagree on none.
+
+More formally, we will say a sequence B<S1> I<overlaps> a sequence B<S2>
+if there exist indexes B<I1> and B<I2>
+and a length B<L> E<gt> B<0> such that
+for all B<I> E<lt> B<L>,
+
+   S1[I1 + I] == S2[I2 + I]
+
+and at least one of the following conditions hold.
+
+=over 4
+
+=item
+
+The overlap includes the entire B<S1> sequence.
+
+=item
+
+The overlap includes the entire B<S2> sequence.
+
+=item
+
+The overlap includes the start of one sequence and the end of the other.
+
+=back 4
+
+Since overlap, thus defined, always includes the start of at least
+one sequence, at least one of the positions reported for a
+match will always be B<0>.
+
+Small overlaps of long sequences are not particularly noteworthy.
+The value of environment variable B<MINTERMS> (default B<20>)
+establishes a lower limit of the length of an I<adequate> overlap
+for long sequences.
+Of course, short query sequences cannot be held to a fixed standard.
+So, for query sequences shorter than B<1.2 * MINTERMS>,
+an overlap of B<.75 * length(query)> is considered I<adequate>.
+And, if even this exceeds the length of a database sequence,
+the length of the database sequence is considered I<adequate>.
+
+=head1 FILES AND FORMATS
+
+The default B<SEQFILE> database is
+F</home/njas/gauss/hisdir/strippedfry>.
+It contains lines of the form
+
+  %S A077013 ,1,2,1,2,3,7,14,43,65,292,992,1154,
+
+The C<%S> is just fixed text.
+The word that follows, C<A077013>,
+is the sequence name.
+The string that follows is the sequence.
+Note the leading and trailing commas,
+and the absence of white space or signs.
+The entire sequence must appear on a single line.
+Any substitute B<SEQFILE> must have the same format.
+
+Query sequences are less restricted.
+They must still appear on a single line,
+but the terms in the sequence can be separated by blanks,
+commas, or, indeed, any non-empty sequence
+of non-numeric characters.
+
+=head1 AUTHOR
+ 
+     John P. Linderman
+     AT&T Shannon Laboratory
+     jpl@research.att.com
+
+=head1 BUGS
+
+The determination of what constitutes an I<adequate> overlap
+is a bit ad-hoc.
+
+If you submit more than one query,
+the summary information doesn't provide information
+about which query matched.
+
+=cut
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc7fry"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+
+# superproc7fry:  initial processing of sequence
+# modified May 7 1997 for V.4
+# prim-ed Oct 30 2007
+
+troncfry:=proc(lis)
+local i,lnew;
+lnew:=lis;
+for i from 1 while length(lnew)>148 do
+lnew:= lnew[ 1 .. nops(lnew)-1 ] :
+od:
+lnew;
+end;
+
+lis:=troncfry(lis);
+#print(`lis`);
+interface(prettyprint=false):
+interface(quiet=true):
+interface(screenwidth=320):
+printlevel:=2:
+s:=convert(lis,set):
+m:=max(op(map(abs,lis))):
+l:=nops(lis):
+fort:=0:
+if m < 2^30 then fort:=1; fi:
+print(`CUT HERE`);
+print(`NVALS`,nops(s));
+print(`MAXVAL`,m);
+print(`NTERMS`,l);
+print(`F77TYPE`,fort);
+quit
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc1"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+# superproc1
+# LOOK AT DIFFERENCE TRIANGLE
+# prim-ed Oct 30 2007
+
+difftriang:=proc(l) local i, j, t, pol:
+t[1]:=l:
+for i from 1 while constseq(t[i]) = 0 do
+	t[i+1]:=[]:
+		for j from 2 to nops(t[i]) do
+		t[i+1]:=[op(t[i+1]), t[i][j]-t[i][j-1] ]:
+					   od:
+				      od:
+if i <= nops(l)-1 then
+	pol:=0:
+	for j from 0 to i-1 do
+		pol := pol + binomial(n,j)*t[j+1][1]
+			    od: 
+	pol:=simplify(expand(pol)):
+		if length(pol) < 3*length(l) then
+	printf("%s\n",`good`);
+	printf("%s%d\n",`degree `, i-1);
+	printf("%s\n", `Polynomial is:`);
+	lprint(pol);
+		else
+	printf("%s\n",`bad`);
+	lprint(0);
+	lprint(0);
+		fi:
+
+else
+	printf("%s\n",`bad`);
+	lprint(0);
+	lprint(0);
+fi:
+end:
+
+constseq:=proc(l)
+local s:
+s:=convert(l,set):
+	if nops(s) = 1 then 1 else 0 fi:
+end:
+
+try1:=difftriang(lis):
+quit:
+
+
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superprocfan"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+# superprocfan   
+# Mira Bernstein's program for multiple diff table (or fan ) test.
+# prim-ed Oct 30 2007
+
+interface(prettyprint=false): interface(quiet=true): interface(screenwidth=320):
+printlevel:=2:
+
+diffan:=proc(l,fanwidth,newterms) local howfar, stratum, i, j, k, t, hit, len:
+len:=nops(l): hit:=0: t[1][1]:=l:
+for k to fanwidth while hit=0 do
+	for i while pseudoconst(t[k][i]) = 0 do
+		t[k][i+1]:=[]:
+		for j from 2 to nops(t[k][i]) do
+			t[k][i+1]:=[op(t[k][i+1]), t[k][i][j]-t[k][i][j-1] ]:
+		od:
+	od:
+	if i<=len-1 then hit:=k:
+	howfar:=k:
+	stratum:=i-1:
+	else
+		t[k+1][1]:=[]:
+		for i to len do t[k+1][1]:=[op(t[k+1][1]),t[k][i][1]] od:
+	fi:
+od:
+
+if hit=0 then [FAILURE,0]
+else 
+	for j from 1 to newterms do
+		t[hit][i]:=[op(t[hit][i]),t[hit][i][len-i]]:
+	od:
+	for j from i-1 to 1 by -1 do 
+		t[hit][j]:= extendlist(t[hit][j],t[hit][j+1]): 
+	od:
+	for k from hit-1 to 1 by -1 do
+		for i from len+1 to len+newterms do t[k][i]:=[t[k+1][1][i]] od:
+		for i from len+newterms-1 to 1 by -1 do 
+			t[k][i]:=extendlist(t[k][i],t[k][i+1])
+		od:
+	od:
+[SUCCESS, howfar, stratum, t[1][1][len+1..len+newterms]];
+fi;
+end:
+
+extendlist:=proc(l1,l2)
+	local i,l;
+	l:=l1:
+	for i from nops(l1) to nops(l2) do l:=[op(l),op(i,l)+op(i,l2)] od:
+l;
+end:
+
+pseudoconst:=proc(l) local s,n:
+n:=nops(l):
+if n>5 then s:={op(l[n-2..n])} else
+	if n>1 then s:={op(l[n-1..n])} else s:={op(l)} fi:
+fi:
+if nops(s) = 1 then 1 else 0 fi:
+end:
+
+#print(`CUT HERE`);
+diffan(lis,10,4);   quit
+
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc8.f", with compiled name proc8
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+c superproc8.f 
+c looks if diffs are periodic
+c compile with  f77 -o proc8 superproc8.f
+	implicit integer(a-z)
+	integer tab(0:100,0:100)
+	nmax=100
+	read(*,*)n
+	if(n.ge.3)goto 1
+	write(*,2)
+2	format("FAILURE")
+	stop
+1	continue
+	if(n.gt.nmax)n=nmax
+c read seq
+	do 10 i=0,n-1
+10	read(*,*)tab(0,i)
+c look at diffs of level "lev"
+	do 20 lev=0,n-3
+c set ntm = no of terms at this level
+	ntm=n-lev
+	if(lev.eq.0)goto 21
+c need to compute diffs to get this level
+	do 30 i=0,ntm-1
+30	tab(lev,i)=tab(lev-1,i+1)-tab(lev-1,i)
+21 	continue
+c see if periodic
+c try init segment of length nseg
+	do 40 nseg=1,ntm-2
+c see if rest of row agrees with prefix
+	do 50 i=nseg,ntm-1
+	j=mod(i,nseg)
+c is tab(lev,i) same as prefix ?
+	if(tab(lev,i).ne.tab(lev,j))goto 60 
+50	continue
+c success
+	write(*,200)
+200	format("TEST: ARE DIFFERENCES OF SOME LEVEL PERIODIC?")
+	write(*,*)"SUCCESS: Differences of order ",lev
+	write(*,*)"appear to be periodic.  If so next 2 terms are:"
+c compute 2 more terms!
+	j=mod(ntm,nseg)
+	tab(lev,ntm)=tab(lev,j)
+	tab(lev,ntm+1)=tab(lev,j+1)
+c go upwards
+	if(lev.eq.0)goto 71
+	do 70 ilev=lev-1,0,-1
+c fill in row ilev
+	itm=n-ilev
+	tab(ilev,itm)=tab(ilev,itm-1)+tab(ilev+1,itm-1)
+	tab(ilev,itm+1)=tab(ilev,itm)+tab(ilev+1,itm)
+70	continue
+71	continue
+	write(*,51)tab(0,n),tab(0,n+1)
+51	format(2i15)
+	write(*,*)" "
+c temp dump table
+c	write(*,*)"table"
+c	do 80 i=0,n-2
+c80	write(*,81)(tab(i,j),j=0,n-i+1)
+81	format(18i4)
+	stop
+60	continue
+40	continue
+20	continue
+	write(*,2)
+	stop
+	end
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc9.f", with compiled name proc9
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+c superproc9.f 
+c gets char fns of binary seq
+c fc -o proc9 superproc9.f
+	implicit integer(a-z)
+	integer lis(200),new(6,200),len(6)
+	nmax=200
+	read(*,*)n
+	if(n.ge.5)goto 1
+	write(*,2)
+2	format("FAILURE")
+	stop
+1	continue
+	if(n.gt.nmax)n=nmax
+c read seq
+	do 10 i=1,n
+10	read(*,*)lis(i)
+c temp print
+c	write(*,100)(lis(i),i=1,n)
+100	format(18i4)
+c find the levels
+	a=lis(1)
+	b=a
+	do 3 i=2,n
+	if(lis(i).eq.a)goto 3
+	b=lis(i)
+	goto 4
+3	continue
+4	continue
+c levels are a and b
+c Char seq. 1, original seq with a,b -> 1,2
+	do 22 i=1,n
+	j=2
+	if(lis(i).eq.a)j=1
+22	new(1,i)=j
+	len(1)=n
+c Char seq. 2, original seq with a,b -> 2,1
+	do 23 i=1,n
+	j=2
+	if(lis(i).eq.b)j=1
+23	new(2,i)=j
+	len(2)=n
+c Char seq. 3, char fn of a's
+	at=0
+	do 20 i=1,n
+	if(lis(i).eq.b) goto 20
+	at=at+1
+	new(3,at)=i
+20	continue
+	len(3)=at
+c Char seq. 4, char fn of b's
+	at=0
+	do 21 i=1,n
+	if(lis(i).eq.a) goto 21
+	at=at+1
+	new(4,at)=i
+21	continue
+	len(4)=at
+c Char seq. 5, the run lengths
+c Char seq. 6, the derivative
+c change to 1's and 2's
+	do 26 i=1,n
+	j=2
+	if(lis(i).eq.a)j=1
+26	lis(i)=j
+c look for the runs
+	at=0
+	dat=0
+	v=lis(1)
+	run=1
+	i=2
+30	continue
+	if(lis(i).eq.v) goto 33
+c there was a change
+c log old run that just ended
+	at=at+1
+	dat=dat+1
+	new(5,at)=run
+	new(6,dat)=i-1
+c start new run
+	run=1
+	v=lis(i)
+	if(i.ge.n)goto 31
+	i=i+1
+	goto 30
+c the run continues
+33	run=run+1
+	if(i.eq.n)goto 31
+	i=i+1
+	goto 30
+c at end
+31	continue
+c	at=at+1
+c	dat=dat+1
+c	new(5,at)=run
+c	new(6,dat)=run
+	len(5)=at
+	len(6)=dat
+c done with #5
+c print
+	write(*,52)
+52	format("CUT HERE")
+	write(*,40)
+	write(*,41)
+	write(*,42)
+	write(*,43)
+40	format("TEST: BINARY SEQUENCE (with entries a,b say).")
+41	format("The 6 characteristic sequences, all equivalent to the")
+42	format("original (replace a,b by 1,2; by 2,1; positions of a's,")
+43	format("of b's; run lengths; derivative) are:")
+	write(*,*)" "
+	do 99 j=1,6
+	write(*,100)(new(j,i),i=1,len(j))
+	write(*,*)" "
+99	continue
+c trivial?
+	do 44 i=1,6
+	if(len(i).lt.3)goto 45
+44	continue
+	goto 46
+c yes trivial
+45	continue
+	write(*,47)
+	write(*,48)
+47	format("SUCCESS: Since one of these has length < 3, the original")
+48	format("sequence was trivial.")
+	stop
+46	continue
+c not triv, print in "f" style
+	write(*,49)
+49	format("Here is the result of looking up these sequences")
+50	format("in the Encyclopedia:")
+	write(*,53)
+53	format("LAST LINE OF INTRO")
+	do 54 j=1,6
+	write(*,55)
+55	format(3hf , , $ )
+	do 56 i=1,len(j)
+56	write(*,57)new(j,i)
+57	format(i5, 1h, ,$)
+	write(*,58)
+58	format(1h )
+54	continue
+	write(*,*)"ZZZZ"
+	stop
+	end
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc2prim", which calls the guessgf sections of gfun
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+Note that gfun is not included here, since
+it is part of Maple.
+
+# superproc2prim
+# CALLS GUESSGF
+# modified Apr 15 2000 to work with maple6
+# Oct 30 2007: I commented out the call to libname
+# Feb 09 2009, changed libname path 
+
+#with(share):
+#readshare(gfun,analysis):
+#libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV11/lib`;
+libname := `/home/njas/bin/gfun.lib.3.31`,`/usr/njas/hisdir`,libname:
+
+with(gfun):
+kernelopts(printbytes=false):
+l0:=3*length(lis):
+t1:=guessgf(lis,x,['ogf']):
+if  length(t1) < l0 then print(t1); fi:
+t1:=guessgf(lis,x,['egf']):
+if  length(t1) < l0 then print(t1); fi:
+t1:=guessgf(lis,y,['revogf']):
+if  length(t1) < l0 then print(t1); fi:
+t1:=guessgf(lis,y,['revegf']):
+if  length(t1) < l0 then print(t1); fi:
+t1:=guessgf(lis,x,['lgdogf']):
+if  length(t1) < l0 then print(t1); fi:
+t1:=guessgf(lis,x,['lgdegf']):
+if  length(t1) < l0 then print(t1); fi:
+quit
+
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superbeattyprim"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+# superbeattyprim
+# Simon Plouffe's Beatty Sequence Checker.
+# version 1.3 : May 4th 1994
+# the calling procedure is :
+# if the sequence is : lt7:=[1,2,3,4,5,6,7,8,9,10];
+# then type : maxmin(lt7);
+# A Beatty sequence is one in which the n-th term is [nz],
+# where z is irrational.  The complementary sequence is [ny],
+# where 1/x + 1/y = 1.  Refs: N. J. A. Sloane,
+# Handbook of Integer Sequences, 1973, p. 29; R. Honsberger, Ingenuity
+# in Mathematics, 1970, p. 93.
+# If this is a Beatty sequence the value given for z will produce
+# the given terms, but is very far from being unique.
+# We define a sequence to be "quasi-linear" if its squared
+# correlation coeffient with the sequence of natural numbers 1,2,3,4,...
+# exceeds .999.  A Beatty sequence is necessarily quasilinear.
+
+# prim-ed Oct 30 2007, Nov 02 2007
+
+interface(prettyprint=false):
+interface(quiet=true):
+interface(screenwidth=320):
+printlevel:=2:
+#with(share): with(gfun):
+# to
+#libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV6/lib`;
+libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV11/lib`;
+with(gfun):
+
+# new version april 1997 from Simon Plouffe 
+# Super-Beatty program, test if there is an 'r squared' correlation
+# in a finite sequence. It returns the r-squared coefficient when
+# the correlation is > 0.999.
+# Author : Simon Plouffe May 5th, 1997.
+# Changed from earlier version to follow Maple changes in calling that
+# stats package function. The calling sequence of that function
+# is not standard in Maple notation and will probably have a bug eventually
+# if ever they change the syntax again.
+# A number of similar tests are done with finite differences.
+
+
+with(stats):
+Digits:=16:
+maxmin:=proc(s) local i,nn,aa,a2,k,m1,m2,m3,m4,dif1,dif2,som,ave;
+        k:=0.99999999999999;
+        aa:=s;
+        nn:=nops(aa);
+        a2:=s1(aa);
+            m1:=[seq(aa[i]/i,i=1..nn)];
+            m2:=[seq((aa[i]+k)/i,i=1..nn)];
+            m3:=[seq(a2[i]/i,i=1..nn)];
+            m4:=[seq((a2[i]+k)/i,i=1..nn)];
+                        dif1:=min(op(m2))-max(op(m1));
+                        dif2:=min(op(m4))-max(op(m3));
+            som:=(min(op(m2))+max(op(m1)))/2;
+            ave:=evalf(a2[nops(aa)]/nn);
+
+print(`CUT HERE`);
+if dif1>=0 then
+#print(` Beatty seq. generated with [n*X] : X =`, som ) fi;
+print(`BEATTY0 `,som) fi;
+
+#if evalf(stats[describe,linearcorrelation](reg(s))) > 0.999 and dif1 < 0 then
+##print (`Original sequence is quasi-linear of unknown generator.`) fi;
+#print (`BEATTY3 `,0) fi;
+#
+#if evalf(stats[describe,linearcorrelation](reg(s1(s)))) > 0.999 and dif2 < 0 then
+##print (`Sequence of partial sums is a quasi-linear seq.`,ave) fi;
+#print(`BEATTY2 `,0) fi;
+#
+#if dif2 >= 0 and evalf(stats[describe,linearcorrelation](reg(s1(s)))) > 0.999 then
+##print( `Sequence of partial sums is a Beatty seq. with [(n+1)*X] - [n*X] =`,ave) fi;
+#print(`BEATTY1 `,ave) fi;
+
+end:
+
+reg:=proc(s)
+local i,aa,nn,t;
+    aa := s;
+    nn := nops(aa);
+    t := [seq(i,i = 1 .. nn)];
+    RETURN(aa,t);
+end:
+
+s1:=proc(s)
+    local z,t1,t2,t3,t4;
+    t1:=listtoseries(s,z,ogf);
+    t2:=t1/(1-z);
+    t3:=series(%,z,nops(s));
+    t4:=seriestolist(t3);
+    RETURN(t4);
+end:
+
+maxmin(lis);
+quit;
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc4prim"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+# superproc4fry
+# CALLS LISTTOREC
+# Apr 15 2000 modified to work with maple6
+# prim-ed Nov 02 2007
+# Feb 09 2009, changed libname path
+
+#with(share):
+#readshare(gfun,analysis):
+#libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV6/lib`;
+#libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV11/lib`;
+libname := `/home/njas/bin/gfun.lib.3.31`,`/usr/njas/hisdir`,libname:
+
+with(gfun):
+l0:=3*length(lis):
+t1:=listtorec(lis,a(n),[ogf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtorec(lis,a(n),[egf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtorec(lis,a(n),[revogf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtorec(lis,a(n),[revegf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtorec(lis,a(n),[lgdogf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtorec(lis,a(n),[lgdegf]):
+if  length(t1) < l0 then print(t1); fi:
+quit
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superproc6prim"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+# superproc6fry
+# CALLS LISTTOALGEQ
+# prim-ed Oct 30 2007
+# Feb 09 2009, changed libname path
+
+#with(share):
+#readshare(gfun,analysis):
+#libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV6/lib`;
+#libname := `/usr/njas/hisdir`,`/usr/local/tools/mapleV11/lib`;
+libname := `/home/njas/bin/gfun.lib.3.31`,`/usr/njas/hisdir`,libname:
+
+with(gfun):
+l0:=3*length(lis):
+t1:=listtoalgeq(lis,a(n),[ogf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtoalgeq(lis,a(n),[egf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtoalgeq(lis,a(n),[revogf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtoalgeq(lis,a(n),[revegf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtoalgeq(lis,a(n),[lgdogf]):
+if  length(t1) < l0 then print(t1); fi:
+t1:=listtoalgeq(lis,a(n),[lgdegf]):
+if  length(t1) < l0 then print(t1); fi:
+quit
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superguesss"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+# Harm Derksen
+# hderksen@math.mit.edu
+# last change: 7/15/1999
+# prim-ed Oct 30 2007
+
+kernelopts(printbytes=false):
+
+`guesss/cfraction`:=proc(list,acc,x)
+local n,i,j,a,guess,val,lco,newguess,newval,newlco,result,newresult;
+n:=nops(list);
+a:=linalg[matrix](n,acc+n,0);
+for i from 1 to n do
+	for j from 1 to acc do
+		a[i,j]:=coeff(list[i],x,j-1);
+	od;
+	a[i,acc+i]:=1;
+od;
+a:=linalg[submatrix](linalg[gausselim](a),1..n,(acc+1)..(acc+n));
+for i from 1 to n do guess[i]:=linalg[row](a,i); od;
+result:=linalg[multiply](a,list);
+for i from 1 to n do
+	val[i]:=ldegree(result[i],x);
+	lco[i]:=tcoeff(result[i],x);
+od;
+while true do
+	newguess:=map(expand,linalg[scalarmul](guess[1],x^(val[2]-val[1])));
+	newresult:=expand(x^(val[2]-val[1])*result[1]);newval:=val[2];
+	newlco:=lco[1];val[n+1]:=val[n]+1;
+for i from 2 to n do
+	while (newval<val[i+1]) do
+		newresult:=rem(expand(newresult-newlco/lco[i]*result[i]*
+			x^(newval-val[i])),x^acc,x);
+newguess:=linalg[matadd](newguess,guess[i],1,-newlco/lco[i]*x^(newval-val[i]));
+		if newresult=0 then RETURN(op(newguess)) fi;
+		newval:=ldegree(newresult);
+		newlco:=tcoeff(newresult);
+	od;
+od;
+for i from 1 to n-1 do
+	result[i]:=result[i+1];
+	guess[i]:=eval(guess[i+1]);
+	val[i]:=val[i+1];
+	lco[i]:=lco[i+1];
+od;
+result[n]:=newresult;
+guess[n]:=eval(newguess);
+val[n]:=newval;
+lco[n]:=newlco;
+od;
+end:
+
+`guesss/monomials`:=proc(list,d,acc,x)
+local i,monsmall,mon,jj;
+if list=[] then RETURN([1]) fi;
+mon:=[];
+for i from 0 to d do
+	monsmall:=`guesss/monomials`(list[2..nops(list)],d-i,acc,x);
+	mon:=[op(mon),seq(rem(expand(list[1]^i*monsmall[jj]),x^acc,x),jj=1..nops(monsmall))];
+od;
+mon;
+end:
+
+`guesss/searchbinomial`:=proc(n)
+local i,j,c;
+c:=0; while(n>=binomial(2*c,c)) do c:=c+1 od;c:=c-1;
+for j from c by -1 to 1 do
+	i:=1;while (n>binomial(j+i,j)) do i:=i+1 od;
+	if n=binomial(j+i,j) then RETURN([i,j]) fi;
+od;
+end:
+
+`guesss/makelist`:=proc(f,n,d,acc,x)
+local g,list,i;
+g:=f;list:=[f];
+for i from 1 to n-1 do
+	g:=diff(g,x);list:=[op(list),expand(x^i*g)]
+od;
+`guesss/monomials`(list,d,acc,x);
+end:
+
+
+`guesss/formalmonomials`:=proc(list,d,x)
+local i,monsmall,mon,jj;
+if list=[] then RETURN([1]) fi;
+mon:=[];
+for i from 0 to d do
+	monsmall:=`guesss/formalmonomials`(list[2..nops(list)],d-i,x);
+	mon:=[op(mon),seq(expand(list[1]^i*monsmall[jj]),jj=1..nops(monsmall))];
+od;
+mon;
+end:
+
+
+`guesss/makeformallist`:=proc(f,n,d,x)
+local g,list,i;
+g:=f;list:=[f];
+for i from 1 to n-1 do
+	g:=diff(g,x);list:=[op(list),expand(x^i*g)]
+od;
+`guesss/formalmonomials`(list,d,acc,x);
+end:
+
+# GUESS Sequence
+guesss:=proc()
+local sequ,i,F,j,jj,n,f,g,polyrel,guess,level,lisst,result,eqns,solutions,var,pq,
+	numextension,x;
+sequ:=args[1];
+printf("%s\n",`CUT`);
+if nargs>1 then
+	numextension:=args[2]
+else
+	numextension:=7;
+fi;
+n:=nops(sequ);
+for level from 2 to trunc(n/2) do
+pq:=`guesss/searchbinomial`(level);
+f:=sum(sequ[j]*x^(j-1),j=1..(n-1));
+lisst:=`guesss/makelist`(f,pq[1],pq[2],n-1,x);
+polyrel:=`guesss/cfraction`(lisst,n-1,x);
+g:=f+sum(guess[j]*x^(n-2+j),j=1..numextension);
+lisst:=`guesss/makelist`(g,pq[1],pq[2],n+numextension-1,x);
+result:=expand(sum(lisst[j]*polyrel[j],j=1..level));
+eqns:={seq(coeff(result,x,jj),jj=(n-1)..(n+numextension-2))};
+var:={seq(guess[jj],jj=1..numextension)};
+solutions:=solve(eqns,var);
+solutions:=subs(solutions,[seq(guess[jj],jj=1..numextension)]);
+if solutions[1]=sequ[n] then 
+lisst:=`guesss/makeformallist`(F(x),pq[1],pq[2],x);
+printf("%s\n",`SUCCESS`);
+printf("%s\n",`Guesss suggests that the generating function  F(x) `);
+printf("%s\n",`may satisfy the following algebraic or differential equation:`);
+printf("%s\n",` `);
+lprint(sum(polyrel[i]*lisst[i],i=1..nops(lisst))=0);
+printf("%s\n",` `);
+printf("%s\n",`If this is correct the next 6 numbers in the sequence are:`);
+printf("%s\n",` `);
+lprint([op(2..numextension,solutions)]);
+printf("%s\n",` `);
+RETURN(); fi;
+od;
+printf("%s\n",`FAILED`);
+RETURN();
+end:
+
+guesss(lis);
+
+quit;
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "superrate.m"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+(*Erraten von Zahlenfolgen*)
+
+(*Rationale Interpolation*)
+
+(* prim-ed Oct 30 2007 *)
+
+RationalInterpolation::usage = 
+"RationalInterpolation[func, {x, m, k}, {x1, x2, ..., xmk1}, (opts)] gives the
+rational interpolant to func (a function of the variable x), where m and
+k are the degrees of the numerator and denominator, respectively, and
+{x1, x2, ..., xmk1} is a list of m+k+1 abscissas of the interpolation points."
+
+RationalInterpolation[func_, {x_, m_Integer, k_Integer}, xlist_, opts___] :=
+    Module[{xinfo, bias, answer, biasOK = True},
+	answer /;
+		((xinfo = {x, m, k};
+		bias = xlist);
+	    (answer = RI[func, xinfo, bias]; answer =!= Fail))
+    ];
+
+RI[f_, xinfo_, bias_] :=
+    Module[{i, mk1, xx, fx, mat, tempvec, x, x0, x1, m, k},
+	x = xinfo[[1]];
+		(m = xinfo[[2]];
+		k = xinfo[[3]];
+		mk1 = m+k+1;
+		xx = bias);
+	fx = Table[f /. x->xx[[i]],{i,Length[xx]}];
+	mat = Table[1,{i,mk1+1}];
+	tempvec = Table[1,{i,mk1}];
+	mat[[1]] = tempvec;
+	mat[[m+2]] = -tempvec*fx;
+	Do[tempvec *= xx;
+		If[i <= m,mat[[i+1]] = tempvec,Null,Null];
+		If[i <= k,mat[[i+m+2]] = -tempvec*fx],{i,Max[m,k]}];
+If[$VersionNumber>=2.,$Messages=OutputStream["",1],$Messages={}];
+	xx = Solve[Transpose[mat].Table[x[i],{i,1,m+k+2}]==Table[0,{i,1,m+k+1}],
+                        Table[x[i],{i,1,m+k+2}]];
+If[$VersionNumber>=2.,$Messages=OutputStream["stdout",1],$Messages={"stdout"}];
+	xx = Table[x[i],{i,1,m+k+2}] /. xx[[1]];
+	If[Head[xx] === Solve, Return[Fail]];
+	Factor[(xx[[1]]+Sum[xx[[i+1]] x^i,{i,m}])/(Sum[xx[[i+m+1]] x^(i-1),{i,k+1}])]
+    ];
+
+
+
+RateFolge[x_List,t_]:=Module[{X=x,funk,var,L1,L2,ii,Erg},
+   L1=Length[X];
+   Do[funk[var]=X[[var]],{var,L1}];
+   Erg={};
+   For[L2=0,L2<=L1-2,L2++,
+      X=RationalInterpolation[funk[var],{var,L1-L2-2,L2},Table[ii,{ii,L1-1}]];
+      If[Factor[Denominator[X]/.var->L1]=!=0&&Factor[(X/.var->L1)-funk[L1]]===0,Erg=Union[{X/.var->t},Erg]]
+      ];
+   Erg
+   ]
+
+
+Rate[x___]:=Module[{X={x},L,Zaehler,Folge,var,ii,Erg={},i},
+   i[0]=i0;i[1]=i1;i[2]=i2;i[3]=i3;i[4]=i4;i[5]=i5;i[6]=i6;i[7]=i7;i[8]=i8;
+   i[9]=i9;i[10]=i10;i[11]=i11;i[12]=i12;i[13]=i13;i[14]=i14;i[15]=i15;
+   i[16]=i16;i[17]=i17;i[18]=i18;i[19]=i19;i[20]=i20;
+   L=Length[X];
+   Folge=Table[0,{L-1}];
+   For[Zaehler=1,Zaehler<=L-1,Zaehler++,
+      Folge[[Zaehler]]=X;
+      X=Table[X[[ii+1]]/X[[ii]],{ii,L-Zaehler}];
+      ];
+   For[Zaehler=1,Zaehler<=L-1,Zaehler++,
+      X=RateFolge[Folge[[Zaehler]],i[Zaehler-1]];
+      If[X=!={},
+         Do[X=Table[Folge[[Zaehler-ii,1]]*
+                Product[X[[var]],
+                    Release[{i[Zaehler-ii],1,i[Zaehler-ii-1]-1}]],
+                {var,Length[X]}],
+            {ii,Zaehler-1}
+           ];
+        ];
+      Erg=Union[Erg,X]
+      ];
+   Erg
+   ]
+Ratepol[x___]:=Module[{X={x},funk,var,L1,L2,ii,Erg},
+   L1=Length[X];
+   Do[funk[var]=X[[var]],{var,L1}];
+   Erg={};
+   X=RationalInterpolation[funk[var],{var,L1-2,0},Table[ii,{ii,L1-1}]];
+   If[Factor[(X/.var->L1)-funk[L1]]===0,Erg=Union[{X/.var->i0},Erg]];
+   Erg
+   ]
+Rateint[x___]:=Module[{X={x},L,Zaehler,Folge,var,ii,Erg={},i},
+   i[0]=i0;
+   L=Length[X];
+   Folge=Table[0,{L-1}];
+   For[Zaehler=1,Zaehler<=Min[1,L-1],Zaehler++,
+      Folge[[Zaehler]]=X;
+      X=Table[X[[ii+1]]/X[[ii]],{ii,L-Zaehler}];
+      ];
+   For[Zaehler=1,Zaehler<=Min[1,L-1],Zaehler++,
+      X=RateFolge[Folge[[Zaehler]],i[Zaehler-1]];
+      If[X=!={},
+         Do[X=Table[Folge[[Zaehler-ii,1]]*
+                Product[X[[var]],
+                    Release[{i[Zaehler-ii],1,i[Zaehler-ii-1]-1}]],
+                {var,Length[X]}],
+            {ii,Zaehler-1}
+           ];
+        ];
+      Erg=Union[Erg,X]
+      ];
+   Erg
+   ]
+Ratekurz[x___]:=Module[{X={x},L,Zaehler,Folge,var,ii,Erg={},i},
+   i[0]=i0;i[1]=i1;i[2]=i2;
+   L=Length[X];
+   Folge=Table[0,{L-1}];
+   For[Zaehler=1,Zaehler<=Min[3,L-1],Zaehler++,
+      Folge[[Zaehler]]=X;
+      X=Table[X[[ii+1]]/X[[ii]],{ii,L-Zaehler}];
+      ];
+   For[Zaehler=1,Zaehler<=Min[3,L-1],Zaehler++,
+      X=RateFolge[Folge[[Zaehler]],i[Zaehler-1]];
+      If[X=!={},
+         Do[X=Table[Folge[[Zaehler-ii,1]]*
+                Product[X[[var]],
+                    Release[{i[Zaehler-ii],1,i[Zaehler-ii-1]-1}]],
+                {var,Length[X]}],
+            {ii,Zaehler-1}
+           ];
+        ];
+      Erg=Union[Erg,X]
+      ];
+   Erg
+   ]
+Rateeins[x___]:=Module[{X={x},L,Zaehler,Folge,var,ii,Erg={},i},
+   i[0]=i0;i[1]=i1;i[2]=i2;i[3]=i3;i[4]=i4;i[5]=i5;i[6]=i6;i[7]=i7;i[8]=i8;
+   i[9]=i9;i[10]=i10;i[11]=i11;i[12]=i12;i[13]=i13;i[14]=i14;i[15]=i16;i[17]=i17;
+   i[18]=i18;i[19]=i19;i[20]=i20;
+   L=Length[X];
+   Folge=Table[0,{L-1}];
+   For[Zaehler=1,Zaehler<=Min[3,L-1],Zaehler++,
+      Folge[[Zaehler]]=X;
+      X=Table[X[[ii+1]]/X[[ii]],{ii,L-Zaehler}];
+      ];
+   For[Zaehler=1,Zaehler<=Min[3,L-1],Zaehler++,
+      X=RateFolge[Folge[[Zaehler]],i[Zaehler-1]];
+      If[X=!={},
+         Do[X=Table[Folge[[Zaehler-ii,1]]*
+                Product[X[[var]],
+                    Release[{i[Zaehler-ii],1,i[Zaehler-ii-1]-1}]],
+                {var,Length[X]}],
+            {ii,Zaehler-1}
+           ];
+        ];
+      If[X=!={},Return[X]];
+      ];
+   Erg
+   ]
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "seqtranslib.m"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+(* seqtranslib.m   version batch 0.10 -- 10 Jan 1998 *)
+(* Integer Sequences Transformations Mathematica Library *)
+(* by Olivier Gerard from original Maple code and ideas by N. J. A. Sloane *)
+(* prim-ed Oct 30 2007 *)
+
+(* Batch code *)
+(* List of meaningful transformed sequences prefixed with indice of transform and without signs *)
+
+SuperTrans[seq_List] := Abs[Cases[MapIndexed[ {First[#2],#1[seq]} & , EISTransTable ],{_Integer,{__Integer}}]]
+
+(* Formatting routines *)
+
+SeqString[seq_List] := StringTake[ToString[seq], {2, -2}]<>"\n";
+
+WriteSeekerList[transeq_List,sortie_:$Output]:=Scan[ WriteString[sortie,"T",StringDrop[ToString[1000+#1[[1]]],1]," ",SeqString[#1[[2]]]]&, transeq]
+
+WriteSeqList[transeq_List,sortie_:$Output]:=(MapIndexed[ WriteString[sortie,SeqString[#]]&, transeq];)
+
+
+
+
+
+(* Utility and Transform Code *)
+
+(* All programs are designed to work for Mathematica 2.0 and higher but Mathematica 3.0 is recommended and may be necessary in future versions. *)
+
+
+
+(* Number Theory utilities *)
+
+
+
+did[m_Integer, n_Integer] := If[Mod[m, n] == 0, 1, 0]; 
+didsigned[m_Integer, n_Integer] := If[Mod[m, n] == 0, (-1)^(m/n), 0]; 
+mob[m_Integer, n_Integer] := If[Mod[m, n] == 0, MoebiusMu[m/n], 0]; 
+
+GCDNormalize[{}]:= {};
+GCDNormalize[seq_List]:= seq/GCD@@seq;
+
+LCMNormalize[{}]:={};
+LCMNormalize[seq_List]:=DeleteCases[seq,0] // (LCM@@#/Reverse[#])&;
+
+IntegerSequenceQ[seq_List]:= Union[IntegerQ/@seq]=={True}
+
+FilterSequence[{}]:= {};
+FilterSequence[seq_List]:=If[And@@(IntegerQ/@seq),seq,{}];
+
+
+
+(* Difference Table utilities *)
+
+
+
+GetDiff[{}] = {};
+GetDiff[{elem_}] = {};
+GetDiff[seq_List]:=Drop[seq,1]-Drop[seq,-1];
+GetDiff[seq_List,n_Integer]:={}/;n>=Length[seq]
+GetDiff[seq_List,n_Integer]:=
+Plus@@Table[(-1)^(n+i)Binomial[n,i]Take[seq,{i+1,Length[seq]-n+i}],{i,0,n}]
+
+GetOffsetDiff[seq_List]:=GetDiff[seq];
+GetOffsetDiff[seq_List,n_Integer]:={}/;n>=Length[seq]
+GetOffsetDiff[seq_List,n_Integer]:=
+Take[seq,{n+1,-1}]-Take[seq,{1,-n-1}]
+
+GetIntervalDiff[seq_List]:=GetDiff[seq];
+GetIntervalDiff[seq_List,n_Integer]:={}/;n>=Length[seq]
+GetIntervalDiff[seq_List,n_Integer]:=
+Take[seq,{n+1,-1}]-Plus@@Table[Take[seq,{i+1,Length[seq]-n+i}],{i,0,n-1}]
+
+GetSum[{}] = {};
+GetSum[{elem_}] = {};
+GetSum[seq_List]:=Drop[seq,1]+ Drop[seq,-1];
+GetSum[seq_List,n_Integer]:={}/;n>=Length[seq]
+GetSum[seq_List,n_Integer]:=
+Plus@@Table[Binomial[n,i]Take[seq,{i+1,Length[seq]-n+i}],{i,0,n}]
+
+GetOffsetSum[seq_List]:=GetSum[seq];
+GetOffsetSum[seq_List,n_Integer]:={}/;n>=Length[seq]
+GetOffsetSum[seq_List,n_Integer]:=
+Take[seq,{1,-n-1}]+Take[seq,{n+1,-1}]
+
+GetIntervalSum[seq_List]:=GetSum[seq];
+GetIntervalSum[seq_List,n_Integer]:={}/;n>=Length[seq]
+GetIntervalSum[seq_List,n_Integer]:=
+Plus@@Table[Take[seq,{i+1,Length[seq]-n+i}],{i,0,n}]
+
+DiffTable[{},___]={};
+DiffTable[seq_List,1] := NestList[GetDiff,seq,Length[seq]-1];
+DiffTable[seq_List,n_Integer] := NestList[GetDiff,DiffTable[seq,n-1][[Range[Length[seq]],1]],Length[seq]-1] /; n>1
+
+PartialProducts[{}]={};
+PartialProducts[seq_List]:=Rest[FoldList[#1 #2&,1,seq]];
+PartialSums[{}]={};
+PartialSums[seq_List]:=Rest[FoldList[#1+#2&,0,seq]];
+
+
+
+(* Generating Function utilities *)
+
+
+
+
+
+SeqToPoly[{}, ___] = {}; 
+SeqToPoly[seq_List, var_Symbol:n] := 
+   Expand[Plus @@ 
+     (Table[Sum[(-1)^(i - 1 - k)*Binomial[i - 1, k]*seq[[k + 1]], {k, 0, i - 1}], 
+        {i, 1, Length[seq]}]*Array[Binomial[var, #1 - 1] & , Length[seq]])]; 
+
+GetPowerCoeffs[f_,var_Symbol:x,n_Integer]:=
+  Block[{g=ExpandAll[f]},DeleteCases[Table[Coefficient[g,var,i],{i,0,n}],0]]
+
+ListToSeries::unkn =
+"This kind of generating function is unknown."; 
+ListToSeries::nimp =
+"This kind of generating function is not yet implemented. \
+Sorry.";
+
+ListToSeries[seq_List, var_Symbol:x, kind_String:"ogf"] := 
+   Switch[kind,
+   "ogf", SeriesData[var, 0, seq, 0, Length[seq], 1],
+   "egf", SeriesData[var, 0, seq/Array[#1! & , Length[seq], 0], 0, Length[seq], 1],
+   "lap", SeriesData[var, 0, seq*Array[#1! & , Length[seq], 0], 0, Length[seq], 1], 
+    "lgdogf", ListToSeries::nimp,
+    "lgdegf", ListToSeries::nimp, _, ListToSeries::unkn]; 
+
+SeriesToList::unkn = ListToSeries::unkn;
+SeriesToList::nimp = ListToSeries::nimp;
+
+SeriesToList[ser_SeriesData, kind_String:"ogf"] := 
+   Switch[kind,
+   "ogf", Array[SeriesCoefficient[ser, #1] & , ser[[5]], 0],
+   "egf", 
+    Array[SeriesCoefficient[ser, #1]*#1! & , ser[[5]], 0],
+   "lap", 
+    Array[SeriesCoefficient[ser, #1]/#1! & , ser[[5]], 0],
+    "lgdogf", SeriesToList::nimp,
+    "lgdegf", SeriesToList::nimp,
+    _, SeriesToList::unkn]; 
+
+SeriesToSeries::unkn = ListToSeries::unkn; 
+
+SeriesToSeries[ser_SeriesData, kind_String] := 
+   If[kind == "ogf", ser, ListToSeries[Array[(SeriesCoefficient[ser, #1] & )*
+       ser[[5]], 0], ser[[1]], kind], Null]; 
+
+GetSeriesCoeff::"unkn"=ListToSeries::"unkn";
+GetSeriesCoeff::"nimp"=ListToSeries::"nimp";
+GetSeriesCoeff[ser_SeriesData,j_Integer, kind_String:"ogf"]:=
+Switch[kind,
+	"ogf", SeriesCoefficient[ser,j],
+	"egf", SeriesCoefficient[ser,j ]*(j-1)!,
+	"lap",SeriesCoefficient[ser,j]/(j-1)!,
+	"lgdogf", GetSeriesCoeff::"nimp",
+	"lgdegf", GetSeriesCoeff::"nimp",
+	_,GetSeriesCoeff::"unkn"];
+
+ListToListDiv[{}] := {}; 
+ListToListDiv[seq_List] := seq/Array[#1! & , Length[seq], 0]; 
+ListToListMult[{}] := {}; 
+ListToListMult[seq_List] := seq*Array[#1! & , Length[seq], 0]; 
+
+SeriesToListDiv[ser_SeriesData] := SeriesToList[ser, "egf"]; 
+SeriesToListMult[ser_SeriesData] := SeriesToList[ser, "lap"]
+SeriesToSeriesDiv[ser_SeriesData] := SeriesToSeries[ser, "egf"]
+SeriesToSeriesMult[ser_SeriesData] := SeriesToList[ser, "lap"]
+
+
+
+(* Binary and other bases utilities *)
+
+
+
+
+
+MatchDigits[x_Integer,y_Integer,base_Integer:10]:=
+Block[{bx,by,lx,ly},
+{lx,ly}=Length/@(
+	{bx,by}=(IntegerDigits[#1,base]&)/@{x,y});
+If[lx-ly==0,
+	{bx,by},
+	(Join[Array[0&,Max[lx,ly]-Length[#1]],#1]&)/@{bx,by}]];
+
+MatchBinary[x_Integer,y_Integer]:=MatchDigits[x,y,2];
+
+DigitsToInteger[thedigits_List,base_Integer:10]:=
+Plus@@(Reverse[thedigits] Array[base^#1&,Length[thedigits],0])
+BinaryToInteger[bindig_List]:=DigitsToInteger[bindig,2]
+
+
+
+Xcl[twodig_List]:=Length[Union[twodig]]-1;
+NumAND[x_Integer,y_Integer]:=BinaryToInteger[Min/@Transpose[MatchBinary[x,y]]];
+NumOR[x_Integer,y_Integer]:=BinaryToInteger[Max/@Transpose[MatchBinary[x,y]]];
+Off[General::spell1]
+
+NumXOR[x_Integer,y_Integer]:=BinaryToInteger[Xcl/@Transpose[MatchBinary[x,y]]];
+
+On[General::spell1]
+NimSum[numOne_Integer,numTwo_Integer]:=BinaryToInteger[Plus@@MatchBinary[numOne,numTwo]/.{2\[Rule]0}]
+
+DigitSum[n_Integer,b_Integer:10]:=Plus@@IntegerDigits[n,b];
+DigitRev[n_Integer,b_Integer:10]:=DigitsToInteger[Reverse[IntegerDigits[n,b]],b];
+
+
+
+(* Set-Theoretical Transforms *)
+
+
+
+
+
+$EISShortComplementSize=60;
+$EISLongComplementSize=1000;
+$EISUnsameCount=10;
+$EISMaxCharSeq=100;
+
+
+
+MinExcluded[seq_List]:=
+Module[{theset=Union[seq]},
+	Select[Range[0,Max[seq]+1],\[InvisibleSpace]!(MemberQ[theset,#1])&,1]]
+
+Monotonous[{}]={};
+Monotonous[seq_List]:=Union[Abs[seq]];
+
+MonotonousDiff[{}]={};
+MonotonousDiff[seq_List]:=Block[{seqres},If[seq==(seqres=Union[Abs[seq]])||Length[seq]-Length[seqres]<$EISUnsameCount,{},seqres]];
+
+CompSequence[{}]={};
+CompSequence[seq_List]:=Block[{seqres},
+		If[
+			Length[seqres=Complement[Range[Min[Max[seq],$EISShortComplementSize]],
+						Monotonous[seq]]
+			]<	$EISUnsameCount||
+				Length[seqres]>$EISShortComplementSize-$EISUnsameCount,
+		{},
+		seqres]];
+CompSequenceLong[{}]={};
+CompSequenceLong[seq_List]:=Complement[Range[Min[Max[seq],$EISLongComplementSize]],Monotonous[seq]]
+
+
+
+TwoValuesQ[seq_List]:= (Length[Union[seq]]==2)
+
+
+
+CharSequence[{}]={};
+CharSequence[seq_List]:=Block[{b,reslen},b=Monotonous[seq];reslen=Min[Max[b],$EISMaxCharSeq];
+		Last[Transpose[Sort[Transpose[
+						{Join[b,Complement[Range[0,reslen],b]],Join[Array[1&,Length[b]],Array[0&,1+reslen-Length[b]]]}]]]]]
+
+
+
+(* SubSequence Extraction *)
+
+
+
+
+
+SeqExtract[{}, ___] = {};
+SeqExtract[seq_List, period_Integer:1, start_Integer:1] := 
+   seq[[start + period*Range[0, Floor[(Length[seq] - start)/period]]]]
+
+
+
+Decimate[{}, ___] = {}; 
+Decimate[seq_List, k_Integer, j_Integer] := 
+  With[{l = Floor[(Length[seq] + k - 1 - j)/k]}, 
+   If[l < 1, {}, seq[[1 + j + k*Range[0, l - 1]]]]]
+Bisect[seq_List, 0] := Decimate[seq, 2, 0]; 
+  (Bisect[seq_List, 1] := Decimate[seq, 2, 1]; )
+Bisect[seq_List, start_Integer] = {}; Trisect[seq_List, 0] := Decimate[seq, 3, 0]; 
+  (Trisect[seq_List, 1] := Decimate[seq, 3, 1]; )
+Trisect[seq_List, 2] := Decimate[seq, 3, 2]; 
+Trisect[seq_List, start_Integer] = {}; 
+
+
+
+(* Elementary Transforms *)
+
+
+
+LeftTransform[{}]:={};
+LeftTransform[seq_List]:=Rest[seq];
+RightTransform[{}]:={};
+RightTransform[seq_List]:=Prepend[seq,1];
+
+MulTwoTransform[{}]={};
+MulTwoTransform[seq_List]:=Join[{First[seq]},Rest[seq] 2];
+DivTwoTransform[{}]={};
+DivTwoTransform[seq_List]:=Join[{First[seq]},Rest[seq]/2];
+NegateTransform[{}]={};
+NegateTransform[seq_List]:=Join[{First[seq]},-Rest[seq]];
+
+
+
+(* Difference Table (Binomial)  Transforms *)
+
+
+
+BinomialTransform[{},___]={};
+BinomialTransform[seq_List,way_:1]:=Table[Sum[way^(i - 1 - k)*Binomial[i - 1, k]*seq[[k + 1]], {k, 0, i - 1}],{i,1,Length[seq]}];
+BinomialInvTransform[{},___]={};
+BinomialInvTransform[seq_List,way_:1]:=BinomialTransform[seq,-way]
+
+
+
+(* Rational Generating Function Transforms *)
+
+
+
+GFProdaaaTransform[{},___]:={};
+GFProdaaaTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[1/ListToSeries[seq,var,gftype]^2,gftype]]
+
+GFProdbbbTransform[{},___]:={};
+GFProdbbbTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]^2,gftype]]
+
+GFProdcccTransform[{},___]:={};
+GFProdcccTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[1/ListToSeries[seq,var,gftype],gftype]]
+
+GFProddddTransform[{},___]:={};
+GFProddddTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]*(1+var)/(1-var),gftype]]
+
+GFProdeeeTransform[{},___]:={};
+GFProdeeeTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]*(1-var)/(1+var),gftype]]
+
+GFProdfffTransform[{},___]:={};
+GFProdfffTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1-var),gftype]]
+
+GFProdgggTransform[{},___]:={};
+GFProdgggTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1-var)^2,gftype]]
+
+GFProdhhhTransform[{},___]:={};
+GFProdhhhTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1-var)^3,gftype]]
+
+GFProdiiiTransform[{},___]:={};
+GFProdiiiTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1+var),gftype]]
+
+GFProdjjjTransform[{},___]:={};
+GFProdjjjTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1+var^2),gftype]]
+
+GFProdkkkTransform[{},___]:={};
+GFProdkkkTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1+var+var^2),gftype]]
+
+GFProdlllTransform[{},___]:={};
+GFProdlllTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1-var^2),gftype]]
+
+GFProdmmmTransform[{},___]:={};
+GFProdmmmTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1-var-var^2),gftype]]
+
+GFProdnnnTransform[{},___]:={};
+GFProdnnnTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1-var+var^2),gftype]]
+
+GFProdoooTransform[{},___]:={};
+GFProdoooTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1+var-var^2),gftype]]
+
+GFProdpppTransform[{},___]:={};
+GFProdpppTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1+var)^2,gftype]]
+
+GFProdqqqTransform[{},___]:={};
+GFProdqqqTransform[seq_List,gftype_String:"ogf"]:=Module[{var},SeriesToList[ListToSeries[seq,var,gftype]/(1+var)^3,gftype]]
+
+
+
+(* Diagonal Generating Function Transforms *)
+
+
+
+GFDiagaaaTransform[{},___]:={};
+GFDiagaaaTransform[seq_List,gftype_String:"ogf"]:=Module[{var,baseser},baseser = ListToSeries[Prepend[seq,0],var,gftype];
+	Table[GetSeriesCoeff[baseser*(1-var)^j,j,gftype],{j,1,Length[seq]}]]
+
+GFDiagbbbTransform[{},___]:={};
+GFDiagbbbTransform[seq_List,gftype_String:"ogf"]:=Module[{var,baseser},baseser = ListToSeries[Prepend[seq,0],var,gftype];
+	Table[GetSeriesCoeff[baseser*(1+var)^j,j,gftype],{j,1,Length[seq]}]]
+
+GFDiagcccTransform[{},___]:={};
+GFDiagcccTransform[seq_List,gftype_String:"ogf"]:=Module[{var,baseser},baseser = ListToSeries[Prepend[seq,0],var,gftype];
+	Table[GetSeriesCoeff[baseser/(1-var)^j,j,gftype],{j,1,Length[seq]}]]
+
+GFDiagdddTransform[{},___]:={};
+GFDiagdddTransform[seq_List,gftype_String:"ogf"]:=Module[{var,baseser},baseser = ListToSeries[Prepend[seq,0],var,gftype];
+	Table[GetSeriesCoeff[baseser/(1+var)^j,j,gftype],{j,1,Length[seq]}]]
+
+
+
+(* Classical (Euler, M\[ODoubleDot]bius, Stirling) *)
+
+
+
+
+
+EulerTransform[{}]={};
+EulerTransform[seq_List]:=Module[{coeff,final={}},
+coeff=Table[Sum[d*did[i, d]*seq[[d]], {d, 1, i}],{i,1,Length[seq]}];
+For[i=1,i<=Length[seq],i++,AppendTo[final,(coeff[[i]] + Sum[coeff[[d]]*final[[i - d]], {d, 1, i - 1}])/i]];final];
+
+EulerInvTransform[{}]={};
+EulerInvTransform[seq_List]:=Module[{final={}},
+For[i=1,i<=Length[seq],i++,AppendTo[final,i*seq[[i]] - Sum[final[[d]]*seq[[i - d]], {d, 1, i - 1}]]];
+Table[Sum[mob[i, d]*final[[d]], {d, 1, i}]/i, {i, 1, Length[seq]}]];
+
+MobiusTransform[{}]={};
+MobiusTransform[seq_List]:=Table[Sum[mob[i, d]*seq[[d]], {d, 1, i}],{i,1,Length[seq]}]
+
+MobiusInvTransform[{}]={};
+MobiusInvTransform[seq_List]:=Table[Sum[did[i, d]*seq[[d]], {d, 1, i}],{i,1,Length[seq]}]
+
+StirlingTransform[{}]={};
+StirlingTransform[seq_List]:=Table[Sum[StirlingS2[i, k]*seq[[k]], {k, 1, i}],{i,1,Length[seq]}]
+StirlingInvTransform[{}]={};
+StirlingInvTransform[seq_List]:=Table[Sum[StirlingS1[i, k]*seq[[k]], {k, 1, i}],{i,1,Length[seq]}]
+
+
+
+(* Number Theory Convolutions *)
+
+
+
+LCMConvTransform[___List,{},___List]:={};
+LCMConvTransform[seq_List]:=Table[Sum[LCM[seq[[k]], seq[[i - k + 1]]], {k, 1, i}],{i,1,Length[seq]}];
+
+LCMConvTransform[seqOne_List,seqTwo_List]:=Table[Sum[LCM[seqOne[[k]], seqTwo[[i - k + 1]]], {k, 1, i}],
+		{i,1,Min@@(Length/@{seqOne,seqTwo})}];
+
+GCDConvTransform[___List,{},___List]:={};
+GCDConvTransform[seq_List]:=Table[Sum[GCD[seq[[k]], seq[[i - k + 1]]], {k, 1, i}],{i,1,Length[seq]}];
+
+GCDConvTransform[seqOne_List,seqTwo_List]:=Table[Sum[GCD[seqOne[[k]], seqTwo[[i - k + 1]]], {k, 1, i}],{i,1,Min@@(Length/@{seqOne,seqTwo})}];
+
+
+
+(* Generating Function Transforms
+(Cameron, Revert, RevertExp, Exp,  Log) *)
+
+
+
+CameronTransform[{}]:={};
+CameronTransform[seq_List]:=Module[{var},Rest[SeriesToList[1/(1 - var*ListToSeries[seq, var, "ogf"]),"ogf"]]];
+CameronInvTransform[{}]:={};
+CameronInvTransform[seq_List]:=Module[{var},Rest[SeriesToList[-1/(1 + var*ListToSeries[seq, var, "ogf"]),"ogf"]]];
+
+RevertTransform[{}]:={};
+RevertTransform[seq_List]:=Module[{var,l=Length[seq]},If[seq\[LeftDoubleBracket]1\[RightDoubleBracket]=!=1,{},Rest[SeriesToList[InverseSeries[ListToSeries[seq,var,"ogf"]],"ogf"] Array[(-1)^#1 &,l]]]]
+
+RevertExpTransform[{}]:={};
+RevertExpTransform[seq_List]:=Module[{var,l=Length[seq]},If[seq\[LeftDoubleBracket]1\[RightDoubleBracket]=!=1,{},Rest[SeriesToList[InverseSeries[ListToSeries[seq,var,"egf"]],"ogf"] Array[(-1)^#1 (#1-1)!&,l]]]];
+
+ExpTransform[{}]:={};
+ExpTransform[seq_List]:=Module[{var},Rest[SeriesToList[Exp[ListToSeries[Prepend[seq,0],var,"egf"]],"egf"]]]
+
+LogTransform[{}]:={};
+LogTransform[seq_List]:=Module[{var},Rest[SeriesToList[Log[ListToSeries[Prepend[seq,1],var,"egf"]],"egf"]]]
+
+
+
+(* Convolution Transforms *)
+
+
+
+
+
+ConvTransform[___List,{},___List]:={};
+ConvTransform[seq_List]:=Table[Sum[seq[[k]]*seq[[i - k + 1]], {k, 1, i}], {i, 1, Length[seq]}];
+ConvTransform[seqOne_List,seqTwo_List]:=Table[Sum[seqOne[[k]]*seqTwo[[i - k + 1]], {k, 1, i}], 
+  {i, 1, Min @@ Length /@ {seqOne, seqTwo}}];
+
+ConvInvTransform[seq_List]:=If[First[seq]=!=0,
+Module[{a,aaseq=Table[a[i],{i,Length[seq]}]},
+aaseq/.Last[Solve[ConvTransform[aaseq]==seq,aaseq]]]]
+
+ExpConvTransform[___List,{},___List]:={};
+ExpConvTransform[seq_List]:=Module[{var},SeriesToList[ListToSeries[seq, var, "egf"]^2,"egf"]]
+
+ExpConvTransform[seqOne_List,seqTwo_List]:=
+	Module[{var,tmplen=Min@@(Length/@{seqOne,seqTwo})},
+		SeriesToList[Times@@(ListToSeries[Take[#1,tmplen],var,"egf"]&)/@{seqOne,seqTwo},"egf"]
+	]
+
+LogConvTransform[{}]:={};
+LogConvTransform[seq_List]:=Module[{var},SeriesToList[ListToSeries[seq, var, "lap"]^2,"ogf"]]
+LogConvTransform[seqOne_List,seqTwo_List]:=
+	Module[{var,tmplen=Min[Length/@{seqOne,seqTwo}]},
+		SeriesToList[Times@@(ListToSeries[Take[#1,tmplen],var,"lap"]&)/@{seqOne,seqTwo},"ogf"]
+	]
+
+
+
+(* Binary and other bases related Transforms *)
+
+
+
+
+
+ANDConvTransform[{}]={};
+ANDConvTransform[seq_List]:=Table[Sum[NumAND[seq[[k + 1]], seq[[i - k + 1]]], {k, 0, i}],{i,0,Length[seq]-1}]
+ORConvTransform[{}]={};
+ORConvTransform[seq_List]:=Table[Sum[NumOR[seq[[k + 1]], seq[[i - k + 1]]], {k, 0, i}],{i,0,Length[seq]-1}]
+Off[General::spell1]  
+
+XORConvTransform[{}]={};
+XORConvTransform[seq_List]:=Table[Sum[NumXOR[seq[[k + 1]], seq[[i - k + 1]]], {k, 0, i}], {i, 0, Length[seq] - 1}]
+
+On[General::spell1]   
+
+DigitSumTransform[{},___]:={};
+DigitSumTransform[seq_List,b_Integer:10]:=
+	DigitSum[#,b]&/@seq;
+DigitRevTransform[{},___]:={};
+DigitRevTransform[seq_List,b_Integer:10]:=DigitRev[#,b]&/@seq;
+
+
+
+(* Boustrophedon Transforms *)
+
+
+
+$EISMaxTableWidth=60;
+
+BoustrophedonBisTransformTable[{}]={};
+BoustrophedonBisTransformTable[seq_List,way_Integer:1]:=Module[{n=Min[Length[seq],$EISMaxTableWidth],tritab},tritab=Transpose[{Take[seq,n]}];Table[tritab\[LeftDoubleBracket]i\[RightDoubleBracket]=Nest[Append[#1,#1\[LeftDoubleBracket]-1\[RightDoubleBracket]+way tritab\[LeftDoubleBracket]i-1,i-Length[#1]\[RightDoubleBracket]]&,tritab\[LeftDoubleBracket]i\[RightDoubleBracket],i-1],{i,1,n}]]
+
+BoustrophedonTransformTable[seq_List]:=BoustrophedonBisTransformTable[Prepend[seq,1]]
+
+BoustrophedonTransform[seq_List]:=Last/@BoustrophedonTransformTable[seq]
+
+BoustrophedonBisTransform[seq_List]:=Last/@BoustrophedonBisTransformTable[seq]
+
+BoustrophedonBisInvTransform[seq_List]:=Last/@BoustrophedonBisTransformTable[seq,-1]
+
+BoustrophedonInvTransform[seq_List]:=Last/@Rest[BoustrophedonBisTransformTable[seq,-1]]
+
+
+
+(* Partition and related Transforms *)
+
+
+
+
+
+PartitionTransform[{},___]:={};
+PartitionTransform[seq_List,n_Integer:-1]:=
+Module[{var,valueset,lastindex,lastvalue},
+valueset=Union[seq];
+{lastindex,lastvalue}=If[n==-1,
+	{Length[valueset],Max@@valueset},
+	{First[Flatten[Position[Union[Append[valueset,n]],n]]],n}];
+Rest[SeriesToList[Series[
+	Product[1/(1-var^valueset[[i]]),{i,1,lastindex}],
+	{var,0,lastvalue}],"ogf"]]];
+		
+PartitionInvTransform[{}]:={};
+PartitionInvTransform[seq_List]:=
+Flatten[MapIndexed[ Table[#2[[1]],{#1}]&, 	EulerInvTransform[seq]]]
+
+
+
+
+(* Other Transforms (weigh, weighbisout, eulerbis) *)
+
+
+
+WeighTransform[{},___]:={};
+WeighTransform[seq_List,n_Integer:-1,gftype_String:"ogf"]:=Module[{var,lastvalue},lastvalue=If[n==-1,Max@@seq,n];Rest[SeriesToList[Series[Product[1 - var^seq[[i]], {i, 1, Length[seq]}], {var, 0, lastvalue + 1}],gftype]]]
+
+WeighBisOutTransform[{}]={};
+WeighBisOutTransform[seq_List]:=Module[{var},SeriesToList[Series[Product[(var^(-k) + 1 + var^k)^seq[[k]], {k, 1, Length[seq]}], 
+  {var, 0, Length[seq] + 1}],"ogf"]];
+
+EulerBisTransform[{}]={};
+EulerBisTransform[seq_List]:=Module[{var},SeriesToList[Series[Sum[seq[[k]]*(var/(1 + var))^k, {k, 1, Length[seq]}]/(1 + var), 
+  {var, 0, Length[seq]}],"ogf"]];
+
+
+
+(* To be made: weighout, weighouti, etrans, ptrans, pairtrans *)
+
+
+
+(* Function Management *)
+
+RegularTransList = 
+   {"Binomial", "Euler", "Mobius", "Stirling", "Cameron", "Boustrophedon", 
+    "BoustrophedonBis", "Partition"}; 
+((InverseFunction[Evaluate[ToExpression[StringJoin[#1, "Transform"]]]] ^= 
+        ToExpression[StringJoin[#1, "InvTransform"]]; 
+       InverseFunction[Evaluate[ToExpression[StringJoin[#1, "InvTransform"]]]] ^= 
+        ToExpression[StringJoin[#1, "Transform"]]; ) & ) /@ RegularTransList; 
+
+(* Superseeker Transforms list *)
+
+(* Transforms 095,096,097,098 are currently not implemented and
+return {} *)
+
+(* Transform 008 must be executed before any other transform needing
+the exp gen fun *)
+
+EISTransTable = { Clear[vexpseq];
+Trans[001]= Identity,
+Trans[002]= CompSequence,
+Trans[003]= GCDNormalize,
+Trans[004]= (Rest[#]// Trans[003] )&,
+Trans[005]= (Drop[#,2]// Trans[004]) &,
+Trans[006]= Bisect[#,0]&,
+Trans[007]= Bisect[#,1]&,
+Trans[008]= (vexpseq = #/Array[#1!&,Length[#],0])&,
+Trans[009]= #*Range[Length[#]]&,
+Trans[010]= #/Array[#1!&,Length[#],1]&,
+Trans[011]= 2#&,
+Trans[012]= 3#&,
+Trans[013]= GFProdaaaTransform,
+Trans[014]= GFProdbbbTransform,
+Trans[015]= GFProdcccTransform,
+Trans[016]= GFProddddTransform,
+Trans[017]= GFProdeeeTransform,
+Trans[018]= GetDiff,
+Trans[019]= GetDiff[#,2]&,
+Trans[020]= GetDiff[#,3]&,
+Trans[021]= GFProdfffTransform,
+Trans[022]= GFProdgggTransform,
+Trans[023]= GFProdhhhTransform,
+Trans[024]= GetSum,
+Trans[025]= GetOffsetSum[#,2]&,
+Trans[026]= GFProdiiiTransform,
+Trans[027]= GFProdjjjTransform,
+Trans[028]= GetIntervalSum[#,2]&,
+Trans[029]= GFProdkkkTransform,
+Trans[030]= GetOffsetDiff[#,2]&,
+Trans[031]= GFProdlllTransform,
+Trans[032]= Take[#,{3,-1}]- Take[#,{2,-2}]-Take[#,{1,-3}]&,
+Trans[033]= GFProdmmmTransform,
+Trans[034]= # + Range[Length[#]]&,
+Trans[035]= # +2&,
+Trans[036]= # +3&,
+Trans[037]= # - Range[Length[#]]&,
+Trans[038]= # -2&,
+Trans[039]= # -3&,
+Trans[040]= # +1&,
+Trans[041]= # -1&,
+Trans[042]= GFProdnnnTransform,
+Trans[043]= Take[#,{3,-1}]- Take[#,{2,-2}]+Take[#,{1,-3}]&,
+Trans[044]= GFProdoooTransform,
+Trans[045]= Take[#,{1,-3}]+ Take[#,{2,-2}]-Take[#,{3,-1}]&,
+Trans[046]= GetSum[#,2]&,
+Trans[047]= GetSum[#,3]&,
+Trans[048]= GFProdpppTransform,
+Trans[049]= GFProdqqqTransform,
+Trans[050]= GFDiagaaaTransform,
+Trans[051]= GFDiagbbbTransform,
+Trans[052]= GFDiagcccTransform,
+Trans[053]= GFDiagdddTransform,
+Trans[054]= GFProdaaaTransform[#,"egf"]&,
+Trans[055]= GFProdbbbTransform[#,"egf"]&,
+Trans[056]= GFProdcccTransform[#,"egf"]&,
+Trans[057]= GFProddddTransform[#,"egf"]&,
+Trans[058]= GFProdeeeTransform[#,"egf"]&,
+Trans[059]= GetDiff[vexpseq]&,
+Trans[060]= GetDiff[vexpseq,2]&,
+Trans[061]= GetDiff[vexpseq,3]&,
+Trans[062]= GFProdfffTransform[#,"egf"]&,
+Trans[063]= GFProdgggTransform[#,"egf"]&,
+Trans[064]= GFProdhhhTransform[#,"egf"]&,
+Trans[065]= GetSum[vexpseq]&,
+Trans[066]= GetOffsetSum[vexpseq,2]&,
+Trans[067]= GFProdiiiTransform[#,"egf"]&,
+Trans[068]= GFProdjjjTransform[#,"egf"]&,
+Trans[069]= GetIntervalSum[vexpseq,2]&,
+Trans[070]= GFProdkkkTransform[#,"egf"]&,
+Trans[071]= GetOffsetDiff[vexpseq,2]&,
+Trans[072]= GFProdlllTransform[#,"egf"]&,
+Trans[073]=(Take[#,{3,-1}]- Take[#,{2,-2}]-Take[#,{1,-3}]&[vexpseq])&,
+Trans[074]= GFProdmmmTransform[#,"egf"]&,
+Trans[075]= vexpseq+Range[Length[vexpseq]]&,
+Trans[076]= vexpseq +2&,
+Trans[077]= vexpseq +3&,
+Trans[078]= vexpseq-Range[Length[vexpseq]]&,
+Trans[079]= vexpseq -2&,
+Trans[080]= vexpseq -3&,
+Trans[081]= #+Table[j!,{j,Length[#]}]&,
+Trans[082]= #-Table[j!,{j,Length[#]}]&,
+Trans[083]= GFProdnnnTransform[#,"egf"]&,
+Trans[084]= (Take[#,{3,-1}]- Take[#,{2,-2}]+Take[#,{1,-3}]&[vexpseq])&,
+Trans[085]= GFProdoooTransform[#,"egf"]&,
+Trans[086]= (Take[#,{1,-3}]+ Take[#,{2,-2}]-Take[#,{3,-1}]&[vexpseq])&,
+Trans[087]= GetSum[vexpseq,2]&,
+Trans[088]= GetSum[vexpseq,3]&,
+Trans[089]= GFProdpppTransform[#,"egf"]&,
+Trans[090]= GFProdqqqTransform[#,"egf"]&,
+Trans[091]= GFDiagaaaTransform[#,"egf"]&,
+Trans[092]= GFDiagbbbTransform[#,"egf"]&,
+Trans[093]= GFDiagcccTransform[#,"egf"]&,
+Trans[094]= GFDiagdddTransform[#,"egf"]&,
+Trans[095]={}& (* WeighTransform and alii: not implemented yet *),
+Trans[096]={}&,
+Trans[097]={}& (* WeighTransform[vexpseq]& *),
+Trans[098]={}&,
+Trans[099]= Monotonous,
+Trans[100]= BinomialTransform,
+Trans[101]= BinomialInvTransform,
+Trans[102]= BoustrophedonTransform,
+Trans[103]= BoustrophedonInvTransform,
+Trans[104]= EulerTransform,
+Trans[105]= EulerInvTransform,
+Trans[106]= ExpTransform,
+Trans[107]= ExpConvTransform,
+Trans[108]= CameronTransform,
+Trans[109]= CameronInvTransform,
+Trans[110]= LogTransform,
+Trans[111]= MobiusTransform,
+Trans[112]= MobiusInvTransform,
+Trans[113]= MulTwoTransform,
+Trans[114]= StirlingTransform,
+Trans[115]= StirlingInvTransform
+};
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The file "supertrans"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+
+T001  the sequence itself
+T002  integers not in the sequence
+T003  sequence divided by the gcd of its elements
+T004  sequence divided by the gcd of its elements, from the 2nd term
+T005  sequence divided by the gcd of its elements, from the 3rd term
+T006  elements of odd index in the sequence
+T007  elements of even index in the sequence
+T008  sequence u[j]/(j-1)!
+T009  sequence u[j]*j
+T010  sequence u[j]/j!
+T011  sequence 2*u[j]
+T012  sequence 3*u[j]
+T013  coefficients of 1/Sn(z)^2
+T014  coefficients of Sn(z)^2
+T015  coefficients of 1/Sn(z)
+T016  coefficients of Sn(z)*(1+z)/(1-z)
+T017  coefficients of Sn(z)*(1-z)/(1+z)
+T018  sequence u[j+1]-u[j]
+T019  sequence u[j+2]-2*u[j+1]+u[j]
+T020  sequence u[j+3]-3*u[j+2]+3*u[j+1]-u[j]
+T021  coefficients of Sn(z)/(1-z)
+T022  coefficients of Sn(z)/(1-z)^2
+T023  coefficients of Sn(z)/(1-z)^3
+T024  sequence u[j]+u[j+1]
+T025  sequence u[j]+u[j+2]
+T026  coefficients of Sn(z)/(1+z)
+T027  coefficients of Sn(z)/(1+z^2)
+T028  sequence u[j]+u[j+1]+u[j+2]
+T029  coefficients of Sn(z)/(1+z+z^2)
+T030  sequence u[j+2]-u[j]
+T031  coefficients of Sn(z)/(1-z^2)
+T032  sequence u[j+2]-u[j+1]-u[j]
+T033  coefficients of Sn(z)/(1-z-z^2)
+T034  sequence u[j]+j
+T035  sequence u[j]+2
+T036  sequence u[j]+3
+T037  sequence u[j]-j
+T038  sequence u[j]-2
+T039  sequence u[j]-3
+T040  sequence u[j]+1
+T041  sequence u[j]-1
+T042  coefficients of Sn(z)/(1-z+z^2)
+T043  sequence u[j+2]-u[j+1]+u[j]
+T044  coefficients of Sn(z)/(1+z-z^2)
+T045  sequence u[j]+u[j+1]-u[j+2]
+T046  sequence u[j]+2*u[j+1]+u[j+2]
+T047  sequence u[j]+3*u[j+1]+3*u[j+2]+u[j+3]
+T048  coefficients of Sn(z)/(1+z)^2
+T049  coefficients of Sn(z)/(1+z)^3
+T050  jth coefficient of Sn(z)*(1-z)^j
+T051  jth coefficient of Sn(z)*(1+z)^j
+T052  jth coefficient of Sn(z)/(1-z)^j
+T053  jth coefficient of Sn(z)/(1+z)^j
+T054  coefficients of 1/En(z)^2
+T055  coefficients of En(z)^2
+T056  coefficients of 1/En(z)
+T057  coefficients of En(z)*(1+z)/(1-z)
+T058  coefficients of En(z)*(1-z)/(1+z)
+T059  sequence v[j+1]-v[j]
+T060  sequence v[j+2]-2*v[j+1]+v[j]
+T061  sequence v[j+3]-3*v[j+2]-3*v[j+1]+v[j]
+T062  coefficients of En(z)/(1-z)
+T063  coefficients of En(z)/(1-z)^2
+T064  coefficients of En(z)/(1-z)^3
+T065  sequence v[j]+v[j+1]
+T066  sequence v[j]+v[j+2]
+T067  coefficients of En(z)/(1+z)
+T068  coefficients of En(z)/(1+z^2)
+T069  sequence v[j]+v[j+1]+v[j+2]
+T070  coefficients of En(z)/(1+z+z^2)
+T071  sequence v[j+2]-v[j]
+T072  coefficients of En(z)/(1-z^2)
+T073  sequence v[j+2]-v[j+1]-v[j]
+T074  coefficients of En(z)/(1-z-z^2)
+T075  sequence v[j]+j
+T076  sequence v[j]+2
+T077  sequence v[j]+3
+T078  sequence v[j]-j
+T079  sequence v[j]-2
+T080  sequence v[j]-3
+T081  sequence u[j]+j!
+T082  sequence u[j]-j!
+T083  coefficients of En(z)/(1-z+z^2)
+T084  sequence v[j+2]-v[j+1]+v[j]
+T085  coefficients of En(z)/(1+z-z^2)
+T086  sequence v[j]+v[j+1]-v[j+2]
+T087  sequence v[j]+2*v[j+1]+v[j+2]
+T088  sequence v[j]+3*v[j+1]+3*v[j+2]+v[j+3]
+T089  coefficients of En(z)/(1+z)^2
+T090  coefficients of En(z)/(1+z)^3
+T091  jth coefficient of En(z)*(1-z)^j
+T092  jth coefficient of En(z)*(1+z)^j
+T093  jth coefficient of En(z)/(1-z)^j
+T094  jth coefficient of En(z)/(1+z)^j
+T095  coefficients of product( 1/(1-z^j)^u[j], j=1..inf )
+T096  inverse transform to T095, which was "coefficients of product( 1/(1-z^j)^u[j], j=1..inf )"
+T097  coefficients of product( 1/(1-z^j)^v[j], j=1..inf )
+T098  inverse transform to T097, which was "coefficients of product( 1/(1-z^j)^v[j], j=1..inf )"
+T099  sort terms, remove duplicates
+T100  binomial transform: b(n)=SUM C(n,k)a(k), k=0..n
+T101  inverse binomial transform: b(n)=SUM (-1)^(n-k)*C(n,k)*a(k), k=0..n
+T102  boustrophedon transform (see http://www.research.att.com/~njas/doc/bous.ps)
+T103  inverse boustrophedon transform (see http://www.research.att.com/~njas/doc/bous.ps)
+T104  Euler transform: define b by 1+SUM b(n)x^n = PRODUCT (1-x^n)^-a(n)
+T105  inverse Euler transform: define b by 1+SUM a(n)x^n = PRODUCT (1-x^n)^-b(n)
+T106  exponentiate: define b by 1 + EGF_B (x) = exp EGF_A (x)
+T107  exponential convolution, expand EGF(x)^2
+T108  invert: define b by 1+SUM b(n)x^n = 1/(1 - SUM a(n)x^n)
+T109  invert: define b by 1+SUM a(n)x^n = 1/(1 - SUM b(n)x^n)
+T110  log: define b by EGF of b = log (EGF of a)
+T111  Mobius: define b by b(n)=SUM mu(n/d)*a(d), d divides n
+T112  inverse Mobius: define b by b(n)=SUM a(d), d divides n
+T113  multiply all except leading terms by 2
+T114  Stirling-2 transform: b(n) = SUM S(n,k)a(k), k=0..n
+T115  Stirling-1 transform: b(n) = SUM s(n,k)a(k), k=0..n
+
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The program "supercorr2"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+# SUPERCORR2  looks for sequences closest in correlation 
+# Finds 3 closest that are greater than .999
+need:=.999:
+
+libname := `/usr/njas/hisdir`, libname:
+with(HISfry):
+with(stats):
+Digits:=16:
+interface(prettyprint=false):
+interface(quiet=true):
+interface(screenwidth=320):
+printlevel:=2:
+
+n0:=nops(lis):
+lisset:=convert(lis,set):
+if nops(lisset) = 1 then quit: fi:
+
+x1:=0: x2:=0: x3:=0:
+m1:=0: m2:=0: m3:=0:
+
+for i in indices(sequence) do
+m:=op(i):
+#print(i):
+s:=sequence[m]:
+#print(s):
+ns:=nops(s):
+# compute correlation
+if ns > n0 then
+v1:=lis:
+v2:=[seq(s[j],j=1..n0)]:
+else
+v1:=[seq(lis[j],j=1..ns)]:
+v2:=s:
+fi:
+v1set:=convert(v1,set):
+v2set:=convert(v2,set):
+if ( nops(v1set) > 1 and nops(v2set) > 1) then 			# if 1
+	x:=evalf(Rsquared(v1,v2)):
+if x > need then						# if 2
+#print(`next`,i,m,x);
+if x > x3 then							# if a
+if x > x2 then							# if b
+if x > x1 then							# if c
+	  x3:=x2: m3:=m2: x2:=x1: m2:=m1: x1:=x: m1:=m:
+	  else							# else c
+	  x3:=x2: m3:=m2: x2:=x: m2:=m: 
+	  fi:							# fi c
+	else							# else b
+	x3:=x: m3:=m:
+	fi:							# fi b
+fi:								# fi a
+fi:								# fi 2
+fi:								# fi 1 
+
+od:								# close main
+print(`CLOSEST (if any):`);
+if x1 > need then print(`HIT`, `AA`, m1+10000, x1 ): fi:
+if x2 > need then print(`HIT`, `AA`, m2+10000, x2 ): fi:
+if x3 > need then print(`HIT`, `AA`, m3+10000, x3 ): fi:
+quit
+
+
+
+
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+The file "superhelp.txt"
+=====================================================
+=====================================================
+=====================================================
+=====================================================
+
+
+*************************************************************
+   THIS IS THE HELP FILE FOR SUPERSEEKER
+*************************************************************
+
+Greetings from "superseeker".   This program will accept a
+sequence of integers and try very hard to find an explanation.
+
+
+Superseeker makes use of many things, some of which are:
+
+1. The On-Line Encyclopedia of Integer Sequences (or OEIS)
+                   N. J. A. Sloane
+        AT&T Research Labs, Florham Park, NJ 07932-0971 USA
+- see http://www.research.att.com/~njas/sequences/Seis.html
+
+2. The "gfun" Maple package of Bruno Salvy and Paul Zimmermann.
+
+3. A Mathematica program from Olivier Gerard to carry out various
+sequence transformations.
+
+4. Harm Derksen's program "guesss", which uses Pade'-Hermite approximations
+- see http://www.maplesoft.com/CyberMath/share/guesss.html.
+That algorithm is described in:
+An algorithm to compute generalized Pade'-Hermite forms,
+Report 9403 (1994), Dept. of Math., Catholic University Nijmegen
+(available from http://www.math.lsa.umich.edu/~hderksen/preprints/pade.ps).
+
+5. Christian Kratthentaler's Mathematica program Rate which tries to 
+guess a closed form for a sequence ("rate" is "guess" in German).
+For a description of Rate, see
+http://radon.mat.univie.ac.at/People/kratt/rate/rate.html.
+
+6. John Linderman's program CheckSeq.pl which checks if
+there is a partial overlap between a sequence and any
+sequence in the database.
+
+7. Various other programs.
+
+
+INSTRUCTIONS:
+To submit a sequence to superseeker, send mail to
+
+superseeker@research.att.com
+
+containing a single line of the form
+
+   lookup 1 2 4 6 10 14 20 26 36 46 60 74 94 114
+
+in the body of the message. In the Subject line, say "none".
+
+The terms must be separated by spaces (not commas).
+It is best to give between 10 and 20 terms.
+
+Only one request may be submitted at a time, and (since this
+program does some serious computing), only one request per user
+per hour.  (There is a list of special users who are exempt from
+this restriction.  If you feel you have a genuine need to be
+placed on this list, send mail to njas@research.att.com, giving
+your reasons!)
+
+[To simply look up sequences in the Encyclopedia, it is 
+more efficient to use either the email server at
+   
+   sequences@research.att.com
+
+- send an empty email message to that address to get instructions-
+or the Web server at
+
+   http://www.research.att.com/~njas/sequences/  ]
+
+
+
+RECOMMENDATIONS:
+. Start from the beginning of the sequence (although of course
+	keep in mind that different people may define the zero-th
+	term (say) in different ways
+
+. Minus signs (if any) should be INCLUDED, since most of the
+	programs will make use of them
+
+. If you receive 30 matches from the Encyclopedia, try again
+	giving more terms
+
+. If you give too many terms, it will tie up my machine for a long
+        time, and my boss will be unhappy
+
+. For an array of numbers, try looking up the individual
+	rows, columns or diagonals, whichever seem appropriate
+
+. The program is (mostly) concerned only with infinite sequences
+
+. The program only handles integers.  (For a sequence of
+	rationals, try the sequences of numerators and
+	denominators separately.)
+
+. The word "lookup" may only appear once in the message
+        The "Subject" line is thrown away.
+
+
+TESTS USED
+
+The program will apply some or all of the following tests.
+(The program gives up once it has found a sufficient number
+of possible explanations.  The more trivial the sequence,
+the less time the program will spend studying it.
+Also some of these tests are not applicable to all sequences.
+Only potentially useful results are reported.)
+
+. Look up in the On-Line Encyclopedia both the sequence and the sequence
+	with the first term omitted.
+    	(The reply will report all matches found, up to a limit of 30.)
+
+. Test if a(n) is a polynomial in n  [a(n) denotes the n-th term]
+    	In other words, are the differences of some order constant?
+
+. Test if the differences of some order are periodic.
+    	(Suppose the kth order differences are  d(1), ...,d(n).
+    	They are said to be periodic if there is a number p, the period,
+    	with 1 <= p <= n-2, such that d(i) = d(j) whenever i = j (mod p).)
+
+. Test if any row of the difference table of some depth is essentially
+    	constant.  This detects such sequences as 4^n - n^4.
+	(Let the usual difference table be
+            a(0), a(1), a(2), ...
+		b(0), b(1), ...
+           	    c(0), c(1), ...
+              		....
+	This is the difference table of depth 1. The table of depth 2
+	has as top row
+		a(0), b(0), c(0), ...;
+	and so on.)
+
+. For a 2-valued sequence, compute the six characteristic sequences
+	associated with the sequence and look them up in the OEIS.
+        (Suppose the sequence takes only the values X and Y.
+        The six characteristic sequences, all equivalent to the original, are:
+           replace X,Y by 1,2; by 2,1;
+           the positions of the X's, of the Y's;
+           the run lengths;
+           and the derivative, i.e. the positions where the sequence changes.)
+
+. Form the generating functions (g.f.) for the sequence for each of
+	the following 6 types:
+
+	ogf	ordinary generating function
+	egf	exponential generating function
+	revogf	reversion of ordinary generating function
+	revegf	reversion of exponential generating function
+	lgdogf	logarithmic derivative of ordinary generating function
+	lgdegf	logarithmic derivative of exponential generating function
+
+    	and attempt to represent them as rational functions,
+    	hypergeometric series, or the solution to a linear differential
+    	equation with polynomial coefficients.
+
+. Look for a linear recurrence with polynomial coefficients for the
+    	coefficients of the above 6 types of g.f.'s.
+
+. Look for a polynomial equation in y and x for the g.f. y(x) of each
+    	of the above 6 types.
+
+. Apply the transformations listed below to the sequence and look up
+  	the result in the OEIS.  Stop when 50 matches have been found.
+
+. Test if the sequence is a Beatty sequence.
+	  (A Beatty sequence is one in which the n-th term is [nz],
+	where z is irrational.  The complementary sequence is [ny],
+	where 1/x + 1/y = 1.  Refs: N. J. A. Sloane,
+	Handbook of Integer Sequences, 1973, p. 29; R. Honsberger,
+	Ingenuity in Mathematics, 1970, p. 93.  If this is a Beatty
+	sequence the value given for z will produce the given terms,
+	but is very far from being unique.)
+
+
+LIST OF TRANSFORMATIONS THAT MAY BE APPLIED
+
+Abbreviations used in the following list of transformations:
+u[j]	=	j-th term of the sequence
+v[j]	=	u[j]/(j-1)!
+Sn(z)	=	ordinary generating function
+En(z)	=	exponential generating function
+
+T001  the sequence itself
+T002  integers not in the sequence
+T003  sequence divided by the gcd of its elements
+T004  sequence divided by the gcd of its elements, from the 2nd term
+T005  sequence divided by the gcd of its elements, from the 3rd term
+T006  elements of odd index in the sequence
+T007  elements of even index in the sequence
+T008  sequence u[j]/(j-1)!
+T009  sequence u[j]*j
+T010  sequence u[j]/j!
+T011  sequence 2*u[j]
+T012  sequence 3*u[j]
+T013  coefficients of 1/Sn(z)^2
+T014  coefficients of Sn(z)^2
+T015  coefficients of 1/Sn(z)
+T016  coefficients of Sn(z)*(1+z)/(1-z)
+T017  coefficients of Sn(z)*(1-z)/(1+z)
+T018  sequence u[j+1]-u[j]
+T019  sequence u[j+2]-2*u[j+1]+u[j]
+T020  sequence u[j+3]-3*u[j+2]+3*u[j+1]-u[j]
+T021  coefficients of Sn(z)/(1-z)
+T022  coefficients of Sn(z)/(1-z)^2
+T023  coefficients of Sn(z)/(1-z)^3
+T024  sequence u[j]+u[j+1]
+T025  sequence u[j]+u[j+2]
+T026  coefficients of Sn(z)/(1+z)
+T027  coefficients of Sn(z)/(1+z^2)
+T028  sequence u[j]+u[j+1]+u[j+2]
+T029  coefficients of Sn(z)/(1+z+z^2)
+T030  sequence u[j+2]-u[j]
+T031  coefficients of Sn(z)/(1-z^2)
+T032  sequence u[j+2]-u[j+1]-u[j]
+T033  coefficients of Sn(z)/(1-z-z^2)
+T034  sequence u[j]+j
+T035  sequence u[j]+2
+T036  sequence u[j]+3
+T037  sequence u[j]-j
+T038  sequence u[j]-2
+T039  sequence u[j]-3
+T040  sequence u[j]+1
+T041  sequence u[j]-1
+T042  coefficients of Sn(z)/(1-z+z^2)
+T043  sequence u[j+2]-u[j+1]+u[j]
+T044  coefficients of Sn(z)/(1+z-z^2)
+T045  sequence u[j]+u[j+1]-u[j+2]
+T046  sequence u[j]+2*u[j+1]+u[j+2]
+T047  sequence u[j]+3*u[j+1]+3*u[j+2]+u[j+3]
+T048  coefficients of Sn(z)/(1+z)^2
+T049  coefficients of Sn(z)/(1+z)^3
+T050  jth coefficient of Sn(z)*(1-z)^j
+T051  jth coefficient of Sn(z)*(1+z)^j
+T052  jth coefficient of Sn(z)/(1-z)^j
+T053  jth coefficient of Sn(z)/(1+z)^j
+T054  coefficients of 1/En(z)^2
+T055  coefficients of En(z)^2
+T056  coefficients of 1/En(z)
+T057  coefficients of En(z)*(1+z)/(1-z)
+T058  coefficients of En(z)*(1-z)/(1+z)
+T059  sequence v[j+1]-v[j]
+T060  sequence v[j+2]-2*v[j+1]+v[j]
+T061  sequence v[j+3]-3*v[j+2]-3*v[j+1]+v[j]
+T062  coefficients of En(z)/(1-z)
+T063  coefficients of En(z)/(1-z)^2
+T064  coefficients of En(z)/(1-z)^3
+T065  sequence v[j]+v[j+1]
+T066  sequence v[j]+v[j+2]
+T067  coefficients of En(z)/(1+z)
+T068  coefficients of En(z)/(1+z^2)
+T069  sequence v[j]+v[j+1]+v[j+2]
+T070  coefficients of En(z)/(1+z+z^2)
+T071  sequence v[j+2]-v[j]
+T072  coefficients of En(z)/(1-z^2)
+T073  sequence v[j+2]-v[j+1]-v[j]
+T074  coefficients of En(z)/(1-z-z^2)
+T075  sequence v[j]+j
+T076  sequence v[j]+2
+T077  sequence v[j]+3
+T078  sequence v[j]-j
+T079  sequence v[j]-2
+T080  sequence v[j]-3
+T081  sequence u[j]+j!
+T082  sequence u[j]-j!
+T083  coefficients of En(z)/(1-z+z^2)
+T084  sequence v[j+2]-v[j+1]+v[j]
+T085  coefficients of En(z)/(1+z-z^2)
+T086  sequence v[j]+v[j+1]-v[j+2]
+T087  sequence v[j]+2*v[j+1]+v[j+2]
+T088  sequence v[j]+3*v[j+1]+3*v[j+2]+v[j+3]
+T089  coefficients of En(z)/(1+z)^2
+T090  coefficients of En(z)/(1+z)^3
+T091  jth coefficient of En(z)*(1-z)^j
+T092  jth coefficient of En(z)*(1+z)^j
+T093  jth coefficient of En(z)/(1-z)^j
+T094  jth coefficient of En(z)/(1+z)^j
+T095  coefficients of product( 1/(1-z^j)^u[j], j=1..inf )
+T096  inverse transform to T095, which was "coefficients of product( 1/(1-z^j)^u[j], j=1..inf )"
+T097  coefficients of product( 1/(1-z^j)^v[j], j=1..inf )
+T098  inverse transform to T097, which was "coefficients of product( 1/(1-z^j)^v[j], j=1..inf )"
+T099  sort terms, remove duplicates
+T100  binomial transform: b(n)=SUM C(n,k)a(k), k=0..n
+T101  inverse binomial transform: b(n)=SUM (-1)^(n-k)*C(n,k)*a(k), k=0..n
+T102  boustrophedon transform (see http://www.research.att.com/~njas/doc/bous.ps)
+T103  inverse boustrophedon transform (see http://www.research.att.com/~njas/doc/bous.ps)
+T104  Euler transform: define b by 1+SUM b(n)x^n = PRODUCT (1-x^n)^-a(n)
+T105  inverse Euler transform: define b by 1+SUM a(n)x^n = PRODUCT (1-x^n)^-b(n)
+T106  exponentiate: define b by 1 + EGF_B (x) = exp EGF_A (x)
+T107  exponential convolution, expand EGF(x)^2
+T108  invert: define b by 1+SUM b(n)x^n = 1/(1 - SUM a(n)x^n)
+T109  invert: define b by 1+SUM a(n)x^n = 1/(1 - SUM b(n)x^n)
+T110  log: define b by EGF of b = log (EGF of a)
+T111  Mobius: define b by b(n)=SUM mu(n/d)*a(d), d divides n
+T112  inverse Mobius: define b by b(n)=SUM a(d), d divides n
+T113  multiply all except leading terms by 2
+T114  Stirling-2 transform: b(n) = SUM S(n,k)a(k), k=0..n
+T115  Stirling-1 transform: b(n) = SUM s(n,k)a(k), k=0..n
+
+
+COMMON ERRORS WHEN USING THIS EMAIL SERVICE:
+Make sure that
+the word "lookup" does not appear in the message in the same line as
+any non-numeric characters.  Make sure that the lookup line
+has the form
+
+   lookup 1 4 9 16 25                     GOOD!
+
+and avoid any lines that say things like:
+
+Subject: lookup please                                        BAD!
+Subject: lookup                                               BAD!
+To: lookup <sequences@research.att.com>                       BAD!
+   lookup 1,4,9,16,...      [NO COMMAS OR DOTS ARE ALLOWED!]  BAD!
+   lookup 1 4 9 16 ?                                          BAD!
+
+In a submission to superseeker the word "lookup" may only
+appear once in the entire message.
+
+                 ***********************
+
+THE FORMAT USED IN THE DATABASE is described in the web page
+http://www.research.att.com/~njas/sequences/eishelp1.html
+
+FOR A SIMPLE AND FAST LOOKUP, try sequences@research.att.com
+- send a blank message for instructions
+
+TO CONTRIBUTE A NEW SEQUENCE OR COMMENT use the web page
+http://www.research.att.com/~njas/sequences/Submit.html
+
+TO LOOKUP SEQUENCES USING THE WEB go to
+http://www.research.att.com/~njas/sequences/index.html
+
+FOR MORE INFORMATION ABOUT
+      The On-Line Encyclopedia of Integer Sequences
+see the Welcome page
+http://www.research.att.com/~njas/sequences/Seis.html
