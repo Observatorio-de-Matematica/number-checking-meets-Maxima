@@ -1,4 +1,4 @@
-# number-checking-references
+# Number checking meets Maxima
 Some info to start with number checkers. Also, i wanna try the Maxima implementations, and eventually develope something nice.
 
 # Superseeker (N. J. A. Sloane)
