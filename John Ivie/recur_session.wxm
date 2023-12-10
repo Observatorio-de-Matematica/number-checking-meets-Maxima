@@ -1,0 +1,55 @@
+/* [wxMaxima batch file version 1] [ DO NOT EDIT BY HAND! ]*/
+/* [ Created with wxMaxima version 22.04.0 ] */
+/* [wxMaxima: input   start ] */
+file_search(recur);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+load(%)$
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+char(u(n+3)+6*u(n+2)+12*u(n+1)+8*u(n) ,0,u,n,3, [u(0)=1,u(1)=-2,u(2)=8]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+char(u(n+1)-u(n), (1/6)*n*(n-1)*(n-2)+n-1,u,n,1, [u(0)=1]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+char(u(n+2)-2*u(n+1)+u(n) ,n**2,u,n,2,[u(0)=0,u(1)=1]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+genf(u(n+2)-u(n),2**n,u,n,2, [u(0)=1,u(1)=0]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+char(u(n+2)-4*u(n),3+2*n,u,n,2, [u(0)=1,u(1)=0]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+varc1(u(n+1)-(n+1)*u(n),1,u,n,1,[u(0)=1]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: input   start ] */
+varc2(u(n+1)-(n+1)*u(n) ,1,u,n,1,[u(0)=1]);
+/* [wxMaxima: input   end   ] */
+
+
+/* [wxMaxima: comment start ]
+The functions presented in the paper can be seen in the recur.mac file typing block(file_search(recur),printfile(%%))
+   [wxMaxima: comment end   ] */
+
+
+
+/* Old versions of Maxima abort on loading files that end in a comment. */
+"Created with wxMaxima 22.04.0"$
