@@ -10,3 +10,8 @@ https://mrob.com/pub/ries/src/ries.c.txt
 # Rate -- Guess (Martin Rubey)
 https://def.fe.up.pt/pipermail/maxima-discuss/2002/002808.html
 https://def.fe.up.pt/pipermail/maxima-discuss/2002/002809.html (This one corrects some issues of the previous)
+
+# PSLQ
+https://github.com/andrejv/identify
+https://github.com/baruchel/numerical-routines/tree/master/maxima
+https://github.com/robert-dodier/pslq
